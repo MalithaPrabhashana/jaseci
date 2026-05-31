@@ -92,6 +92,25 @@ def _apply_prompt_caching(messages: list, tools: list | None) {
 }
 
 
+"""Whether the provider's litellm transform delivers images inside tool results.
+
+Anthropic, Gemini/Vertex, and Bedrock have converters that carry `image_url`
+blocks into the native tool-result format. Everything else (OpenAI, Azure, and
+OpenAI-compatible providers like Groq/Mistral) silently drops images in tool
+messages — only `user` messages honor them — so the caller reroutes for those.
+"""
+def _supports_image_in_tool_result(model_name: str) -> bool {
+    try {
+        provider = litellm.get_llm_provider(model_name)[1];
+        return provider in ("anthropic", "vertex_ai", "gemini", "bedrock");
+    } except Exception {
+        return model_name.lower().startswith(
+            ("anthropic/", "claude-", "gemini", "vertex_ai/", "bedrock/")
+        );
+    }
+}
+
+
 """Resolve the effective context window size for a model name via LiteLLM registry."""
 def _litellm_ctx_window(model_name: str) -> int {
     try {
@@ -798,6 +817,10 @@ impl BaseLLM.make_model_params(mt_run: MTRuntime) -> dict {
                 messages[0] = {** first_msg, "content": content + hint};
             }
         }
+    }
+
+    if not _supports_image_in_tool_result(self.model_name) {
+        messages = reroute_tool_images_to_user_message(messages);
     }
 
     if _is_prompt_caching_eligible(self.model_name) {

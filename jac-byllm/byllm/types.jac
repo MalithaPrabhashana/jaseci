@@ -248,6 +248,52 @@ def normalize_tool_result(value: any) -> str | list {
 }
 
 
+"""Relocate images out of `role:tool` messages into a following `role:user`
+message, for providers that don't deliver images inside tool results.
+
+Many providers (OpenAI, Azure, and OpenAI-compatible ones like Groq/Mistral)
+silently drop `image_url` blocks in tool messages; every vision-capable provider
+honors images in `user` messages, so this is the universal delivery path. The
+caller applies it only when the provider lacks native tool-result image support.
+Pure transform over serialized message dicts: returns a new list and keeps each
+tool message's text so it still satisfies the `tool_call_id` contract.
+"""
+def reroute_tool_images_to_user_message(messages: list) -> list {
+    out: list = [];
+    for msg in messages {
+        if (
+            not isinstance(msg, dict)
+            or msg.get("role") != "tool"
+            or not isinstance(msg.get("content"), list)
+        ) {
+            out.append(msg);
+            continue;
+        }
+        text_parts = [
+            b for b in msg["content"]
+            if not (isinstance(b, dict) and b.get("type") == "image_url")
+        ];
+        image_parts = [
+            b for b in msg["content"]
+            if isinstance(b, dict) and b.get("type") == "image_url"
+        ];
+        if not image_parts {
+            out.append(msg);
+            continue;
+        }
+        text_str = " ".join(
+            [b.get("text", "") for b in text_parts if isinstance(b, dict)]
+        ) or "(image in the following message)";
+        out.append({** msg, "content": text_str});
+        out.append({
+            "role": "user",
+            "content": [{"type": "text", "text": "Image from the tool result above:"}] + image_parts,
+        });
+    }
+    return out;
+}
+
+
 """Build a length-bounded printable string from message content.
 
 Stream events and logging consumers expect `result` to be a string.
