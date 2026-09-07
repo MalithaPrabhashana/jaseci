@@ -11,7 +11,7 @@ import yaml;
 import from fixtures { python_lib_mode }
 
 import jaclang.byllm.llm as _byllm_llm_mod;
-import from jaclang.byllm.lib { Image, Model, Video }
+import from jaclang.byllm.lib { Image, Model, ModelPool, Video }
 import types;
 import from jaclang.byllm.mtir { MTRuntime }
 import from jaclang.byllm.exceptions {
@@ -71,6 +71,39 @@ obj _LowerPerson {
         yod: int,
         personality: _LowerPersonality;
 }
+
+"""A litellm Router completion that answers `content`, standing in for a live
+deployment. ModelPool dispatches through the router, so this is the seam for a
+pool test: the pool, its aliases and its fallback chain are all real."""
+def _pool_reply(content: str) -> Callable {
+    def _completion(**_kwargs: object) -> dict {
+        return {
+            "model": "mock-pool-model",
+            "choices": [
+                {
+                    "message": {
+                        "content": content,
+                        "role": "assistant",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop",
+                    "index": 0
+                }
+            ]
+        };
+    }
+    return _completion;
+}
+
+
+"""Two or three pooled models, named so the router's aliasing is observable."""
+def _pool(strategy: str, names: list[str]) -> ModelPool {
+    return ModelPool(
+        models=[Model(model_name=n, api_key="sk-test") for n in names],
+        strategy=strategy
+    );
+}
+
 
 """Identity cast that keeps duck-typed test payloads out of nominal checks."""
 def _as_any(v: any) -> any {
@@ -1233,47 +1266,104 @@ test "provider errors map to byllm exceptions and log at ERROR regardless of deb
 
 """Test ModelPool fallback strategy: router is configured with unique aliases and
 a fallbacks chain; successful responses are returned via the dispatch pipeline."""
-test "model pool router fallback" {
-    stdout_value = run_fixture("model_pool_fallback");
-    assert "fallback_success" in stdout_value;
+test "a fallback pool dispatches through its router" {
+    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
+    _as_any(pool._router).completion = _pool_reply("fallback_success");
+
+    def get_answer(question: str) -> str by pool();
+
+    assert get_answer("test question") == "fallback_success";
 }
 
 """Test ModelPool load-balancing (simple-shuffle): all three deployments share the
 pool-model alias; three independent calls all succeed and the alias is pool-model."""
-test "model pool router load balance" {
-    stdout_value = run_fixture("model_pool_round_robin");
-    assert "pool_alias:pool-model" in stdout_value;
-    assert stdout_value.count("load_balance_response") == 3;
+test "a load-balancing pool shares one alias across every deployment" {
+    pool = _pool(
+        "simple-shuffle", ["gpt-3.5-turbo", "gpt-4o-mini", "gemini/gemini-2.0-flash"]
+    );
+    assert pool.model_name == "pool-model" , f"got {pool.model_name!r}";
+    _as_any(pool._router).completion = _pool_reply("load_balance_response");
+
+    def get_answer(question: str) -> str by pool();
+
+    answers = [get_answer(f"question {i}") for i in range(3)];
+    assert answers == ["load_balance_response"] * 3 , f"got {answers}";
 }
 
 """Test ModelPool propagates router exceptions: when the LiteLLM Router
 raises (all deployments exhausted) the exception reaches the caller."""
-test "model pool router all fail" {
-    stdout_value = run_fixture("model_pool_all_fail");
-    assert "EXPECTED_ERROR: RateLimitError" in stdout_value;
-    assert "UNEXPECTED" not in stdout_value;
+test "a pool with every deployment exhausted raises rather than swallowing" {
+    import from litellm.exceptions { RateLimitError as _LiteLLMRateLimit }
+    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
+
+    def _all_fail(**_kwargs: object) -> object {
+        raise _LiteLLMRateLimit(
+            message="All deployments exhausted",
+            model="gpt-3.5-turbo",
+            llm_provider="openai"
+        );
+    }
+    _as_any(pool._router).completion = _all_fail;
+
+    def get_answer(question: str) -> str by pool();
+
+    raised: any = None;
+    try {
+        get_answer("test");
+    } except Exception as e {
+        raised = e;
+    }
+    assert raised is not None , "an exhausted pool must not return quietly";
+    assert type(raised).__name__ == "RateLimitError" , (
+        f"expected the rate-limit error to propagate, got {type(raised).__name__}"
+    );
 }
 
 """Test ModelPool cost-based-routing uses the async path (acompletion).
 LiteLLM Router only supports cost-based-routing via acompletion(); ModelPool
 bridges this via ThreadPoolExecutor to stay safe in async frameworks."""
-test "model pool router cost based" {
-    stdout_value = run_fixture("model_fallbacks_convenience");
-    assert "cost_based_success" in stdout_value;
+test "cost-based routing dispatches through the async router path" {
+    # cost-based-routing only has an acompletion path; ModelPool bridges it onto
+    # the sync call, so patching acompletion proves the bridge is used.
+    pool = _pool("cost-based-routing", ["gpt-4o", "gpt-4o-mini"]);
+    async def _acompletion(**_kwargs: object) -> dict {
+        return _pool_reply("cost_based_success")();
+    }
+    _as_any(pool._router).acompletion = _acompletion;
+
+    def get_answer(question: str) -> str by pool();
+
+    assert get_answer("test") == "cost_based_success";
 }
 
 """Test ModelPool LiteLLM Router model_list initialisation.
 Fallback strategy: unique per-model aliases + fallbacks list.
 Load-balance strategy: all models share pool-model alias."""
-test "model pool router init" {
-    stdout_value = run_fixture("model_pool_router_init");
-    assert "fb_pool_alias:pool-primary" in stdout_value;
-    assert "fb_deploy_count:2" in stdout_value;
-    assert "fb_fallbacks_has_primary:True" in stdout_value;
-    assert "fb_fallbacks_has_chain:True" in stdout_value;
-    assert "lb_pool_alias:pool-model" in stdout_value;
-    assert "lb_deploy_count:3" in stdout_value;
-    assert "lb_all_share_alias:True" in stdout_value;
+test "router init aliases deployments by strategy" {
+    fb = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
+    fb_models: any = _as_any(fb._router).model_list;
+    fb_chain: any = _as_any(fb._router).fallbacks;
+
+    assert fb.model_name == "pool-primary" , f"got {fb.model_name!r}";
+    assert len(fb_models) == 2 , f"got {len(fb_models)} deployments";
+    assert fb_models[0]["model_name"] == "pool-primary";
+    assert fb_models[1]["model_name"] == "pool-fallback-1";
+    assert "pool-primary" in fb_chain[0] , f"got {fb_chain}";
+    assert "pool-fallback-1" in fb_chain[0].get("pool-primary", []) , (
+        f"the fallback chain must name the next deployment: {fb_chain}"
+    );
+
+    # A load-balancing strategy shares one alias so the router treats the
+    # deployments as interchangeable.
+    lb = _pool("simple-shuffle", ["gpt-3.5-turbo", "gpt-4", "gpt-4o"]);
+    lb_models: any = _as_any(lb._router).model_list;
+    assert lb.model_name == "pool-model";
+    assert len(lb_models) == 3;
+    assert all(m["model_name"] == "pool-model" for m in lb_models) , (
+        f"every deployment should share the alias: {[
+            m['model_name'] for m in lb_models
+        ]}"
+    );
 }
 
 # MCP integration tests
