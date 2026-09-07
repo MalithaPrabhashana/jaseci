@@ -11,7 +11,7 @@ import yaml;
 import from fixtures { python_lib_mode }
 
 import jaclang.byllm.llm as _byllm_llm_mod;
-import from jaclang.byllm.lib { Model }
+import from jaclang.byllm.lib { Image, Model }
 import types;
 import from jaclang.byllm.mtir { MTRuntime }
 import from jaclang.byllm.exceptions {
@@ -26,6 +26,7 @@ import dataclasses;
 import from jaclang { JacRuntimeInterface as Jac }
 import from support_tests {
     FakeLLM,
+    typed,
     finish,
     mk_run,
     say,
@@ -38,6 +39,15 @@ import from support_tests {
 
 glob jac_import = Jac.jac_import,
      FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures");
+
+
+enum _LowerPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
+
+obj _LowerPerson {
+    has full_name: str,
+        yod: int,
+        personality: _LowerPersonality;
+}
 
 """Identity cast that keeps duck-typed test payloads out of nominal checks."""
 def _as_any(v: any) -> any {
@@ -59,14 +69,46 @@ test "llm mail summerize" {
     }
 }
 
-test "method include context" {
-    stdout_value = run_fixture("method_incl_ctx");
-    assert "Average marks for Alice : 86.75" in stdout_value;
+test "a method's own object reaches the prompt as context" {
+    llm = FakeLLM(replies=[typed(86.75)]);
+
+    obj Student {
+        has name: str,
+            marks: list[int] = [];
+
+        """Calculate the average of the marks."""
+        def get_average -> float by llm();
+    }
+    student = Student(name="Alice", marks=[81, 99, 77, 90]);
+
+    average = student.get_average();
+    assert average == 86.75 , f"a float return must be converted, got {average!r}";
+    assert isinstance(average, float) , f"expected float, got {type(average).__name__}";
+    prompt = str(llm.sent("messages")[0]);
+    assert "Alice" in prompt , "the receiver's fields must reach the prompt";
+    assert "99" in prompt , f"the marks must reach the prompt: {prompt[:400]}";
 }
 
-test "with llm function" {
-    stdout_value = run_fixture("with_llm_function");
-    assert "\U0001f464\u27a1\ufe0f\U0001f5fc" in stdout_value;
+test "incl_info examples and temperature reach the model" {
+    emoji_examples: list[dict[(str, str)]] = [
+        {
+            "input": "I love tp drink pina coladas",
+            "output": "\U0001f464\u2764\ufe0f\U0001f964\U0001f34d\U0001f965"
+        },
+        {"input": "Mime Person", "output": "\U0001f464\U0001f932\U0001f6b7"}
+    ];
+    llm = FakeLLM(replies=[say("\U0001f464\u27a1\ufe0f\U0001f5fc")]);
+
+    def get_emoji(input: str) -> str by llm(
+        temperature=0.7, incl_info={"examples": emoji_examples}
+    );
+
+    assert get_emoji("Lets move to paris") == "\U0001f464\u27a1\ufe0f\U0001f5fc";
+    sent = llm.seen[0];
+    assert sent["temperature"] == 0.7 , f"temperature must reach the model, got {sent.get(
+        'temperature'
+    )}";
+    assert "Mime Person" in str(sent["messages"]) , "incl_info examples must reach the prompt";
 }
 
 test "method tool call" {
@@ -124,9 +166,21 @@ test "temperature passed through when set" {
     )}";
 }
 
-test "image input" {
-    stdout_value = run_fixture("image_test");
-    assert "The image shows a hot air balloon shaped like a heart" in stdout_value;
+test "an image argument reaches the prompt as a data url" {
+    try {
+        import PIL;
+    } except ImportError {
+        testskip("This test requires Pillow to be installed");
+    }
+    answer = "The image shows a hot air balloon shaped like a heart.";
+    llm = FakeLLM(replies=[say(answer)]);
+
+    def explain_the_image(image: Image) -> str by llm();
+
+    image = Image(os.path.join(FIXTURE_DIR, "image.jpg"));
+    assert explain_the_image(image) == answer;
+    prompt = str(llm.sent("messages")[0]);
+    assert "data:image/jpeg;base64," in prompt , "the image must be inlined into the prompt";
 }
 
 test "image param with sem string doesn't crash Message.to_dict" {
@@ -233,11 +287,25 @@ test "deprecated method param" {
     assert "'method' parameter is deprecated" in str(deprecation_warnings[0].message);
 }
 
-test "with llm lower" {
-    stdout_value = run_fixture("with_llm_lower");
-    assert (
-        "J. Robert Oppenheimer was a Introvert person who died in 1967" in stdout_value
+test "a typed object return is parsed, enum member and all" {
+    llm = FakeLLM(
+        replies=[
+            say(
+                '{"schema_object_wrapper": {"full_name": "J. Robert Oppenheimer", '
+                '"yod": 1967, "personality": "Introvert"}}'
+            )
+        ]
     );
+
+    def get_person_info(name: str) -> _LowerPerson by llm();
+
+    person = get_person_info("Oppenheimer");
+    assert person.full_name == "J. Robert Oppenheimer" , f"got {person!r}";
+    assert person.yod == 1967;
+    assert person.personality == _LowerPersonality.INTROVERT , (
+        f"enum member must be reconstructed, got {person.personality!r}"
+    );
+    assert "Oppenheimer" in str(llm.sent("messages")[0]) , "the argument must reach the prompt";
 }
 
 test "with llm type" {
@@ -287,17 +355,33 @@ test "with llm video" {
     assert video_explanation in stdout_value;
 }
 
-test "semstrings" {
-    stdout_value = run_fixture("llm_semstrings");
-    assert "Specific number generated: 120597" in stdout_value;
+# `sem` is a module-level construct, so these live beside their test rather than
+# inside it, and the FakeLLM is module-level for the same reason.
+glob _sem_llm = FakeLLM(replies=[typed(120597), say("R8@jL3pQ")]);
 
-    i = stdout_value.find("Generated password:");
-    password = stdout_value[i:].split("\n")[0];
+def _generate_specific_number -> int by _sem_llm();
 
-    assert len(password) >= 8 , "Password should be at least 8 characters long.";
-    assert any(c.isdigit() for c in password) , "Password should contain at least one digit.";
-    assert any(c.isupper() for c in password) , "Password should contain at least one uppercase letter.";
-    assert any(c.islower() for c in password) , "Password should contain at least one lowercase letter.";
+sem _generate_specific_number = "Generates a specific number that is 120597 and returns it.";
+
+def _generate_password -> str by _sem_llm();
+
+sem _generate_password = "Generates a password with an uppercase letter, a digit and a symbol.";
+
+test "a sem string reaches the prompt and a typed return is converted" {
+    number = _generate_specific_number();
+    assert number == 120597 , f"expected 120597, got {number!r}";
+    assert isinstance(number, int) , (
+        f"declared -> int, got {type(number).__name__}: parse_response did not run"
+    );
+    assert "120597" in str(_sem_llm.sent("messages")[0]) , (
+        "the sem string is the prompt; without it the model is told nothing"
+    );
+
+    password = _generate_password();
+    assert password == "R8@jL3pQ";
+    assert "uppercase letter" in str(_sem_llm.sent("messages")[1]) , (
+        "each call carries its own sem string"
+    );
 }
 
 test "python lib mode" {

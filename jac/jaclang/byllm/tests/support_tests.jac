@@ -62,6 +62,22 @@ def say(content: str, usage: dict | None = None, finish_reason: str = "") -> Rep
 }
 
 
+"""A reply carrying a typed value.
+
+Every non-`str` return type is parsed out of a `schema_object_wrapper` envelope, scalars
+included: a bare "120597" raises OutputConversionError for a `-> int`. This writes the
+envelope so a test can script the value it means.
+
+    typed(120597)                      # -> int
+    typed({"name": "Ada", "age": 36})  # -> a dataclass or obj
+    typed(["a", "b"])                  # -> list[str]
+"""
+def typed(value: object, usage: dict | None = None) -> Reply {
+    import json;
+    return say(json.dumps({"schema_object_wrapper": value}), usage=usage);
+}
+
+
 """A single tool call; `args` may be a dict or an already-encoded JSON string."""
 def call(
     name: str,
