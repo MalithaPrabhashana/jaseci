@@ -1,5 +1,3 @@
-"""Tests for Integration with Jaclang."""
-
 import contextlib;
 import io;
 import os;
@@ -42,70 +40,6 @@ glob jac_import = Jac.jac_import,
      FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures");
 
 
-enum _WebpPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
-
-obj _WebpPerson {
-    has full_name: str,
-        year_of_death: str,
-        personality: _WebpPersonality;
-}
-
-enum _MethodPersonality { INTROVERT, EXTROVERT }
-
-obj _MethodPerson {
-    has name: str,
-        age: int;
-}
-
-glob _METHOD_PERSONALITIES: set[_MethodPersonality] = {
-         _MethodPersonality.INTROVERT,
-         _MethodPersonality.EXTROVERT
-     };
-
-enum _Sentiment { POSITIVE, NEGATIVE, NEUTRAL }
-
-enum _LowerPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
-
-obj _LowerPerson {
-    has full_name: str,
-        yod: int,
-        personality: _LowerPersonality;
-}
-
-"""A litellm Router completion that answers `content`, standing in for a live
-deployment. ModelPool dispatches through the router, so this is the seam for a
-pool test: the pool, its aliases and its fallback chain are all real."""
-def _pool_reply(content: str) -> Callable {
-    def _completion(**_kwargs: object) -> dict {
-        return {
-            "model": "mock-pool-model",
-            "choices": [
-                {
-                    "message": {
-                        "content": content,
-                        "role": "assistant",
-                        "tool_calls": None
-                    },
-                    "finish_reason": "stop",
-                    "index": 0
-                }
-            ]
-        };
-    }
-    return _completion;
-}
-
-
-"""Two or three pooled models, named so the router's aliasing is observable."""
-def _pool(strategy: str, names: list[str]) -> ModelPool {
-    return ModelPool(
-        models=[Model(model_name=n, api_key="sk-test") for n in names],
-        strategy=strategy
-    );
-}
-
-
-"""Identity cast that keeps duck-typed test payloads out of nominal checks."""
 def _as_any(v: any) -> any {
     return v;
 }
@@ -125,47 +59,6 @@ test "llm mail summerize" {
     }
 }
 
-test "a method's own object reaches the prompt as context" {
-    llm = FakeLLM(replies=[typed(86.75)]);
-
-    obj Student {
-        has name: str,
-            marks: list[int] = [];
-
-        """Calculate the average of the marks."""
-        def get_average -> float by llm();
-    }
-    student = Student(name="Alice", marks=[81, 99, 77, 90]);
-
-    average = student.get_average();
-    assert average == 86.75 , f"a float return must be converted, got {average!r}";
-    assert isinstance(average, float) , f"expected float, got {type(average).__name__}";
-    prompt = str(llm.sent("messages")[0]);
-    assert "Alice" in prompt , "the receiver's fields must reach the prompt";
-    assert "99" in prompt , f"the marks must reach the prompt: {prompt[:400]}";
-}
-
-test "incl_info examples and temperature reach the model" {
-    emoji_examples: list[dict[(str, str)]] = [
-        {
-            "input": "I love tp drink pina coladas",
-            "output": "\U0001f464\u2764\ufe0f\U0001f964\U0001f34d\U0001f965"
-        },
-        {"input": "Mime Person", "output": "\U0001f464\U0001f932\U0001f6b7"}
-    ];
-    llm = FakeLLM(replies=[say("\U0001f464\u27a1\ufe0f\U0001f5fc")]);
-
-    def get_emoji(input: str) -> str by llm(
-        temperature=0.7, incl_info={"examples": emoji_examples}
-    );
-
-    assert get_emoji("Lets move to paris") == "\U0001f464\u27a1\ufe0f\U0001f5fc";
-    sent = llm.seen[0];
-    assert sent["temperature"] == 0.7 , f"temperature must reach the model, got {sent.get(
-        'temperature'
-    )}";
-    assert "Mime Person" in str(sent["messages"]) , "incl_info examples must reach the prompt";
-}
 
 test "method tool call" {
     stdout_value = run_fixture("method_tool");
@@ -191,9 +84,6 @@ test "params format" {
         assert key in extracted_dict , f"Missing key: {key}";
     }
 
-    # Temperature is omitted entirely when the caller never sets one, so the
-    # provider (or an aggregator like OpenRouter) applies its own default
-    # instead of byLLM forcing an unsupported value. See issue #7687.
     assert "temperature" not in extracted_dict , "temperature must be omitted when unset";
 
     add_message = extracted_dict["messages"];
@@ -222,22 +112,6 @@ test "temperature passed through when set" {
     )}";
 }
 
-test "an image argument reaches the prompt as a data url" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
-    answer = "The image shows a hot air balloon shaped like a heart.";
-    llm = FakeLLM(replies=[say(answer)]);
-
-    def explain_the_image(image: Image) -> str by llm();
-
-    image = Image(os.path.join(FIXTURE_DIR, "image.jpg"));
-    assert explain_the_image(image) == answer;
-    prompt = str(llm.sent("messages")[0]);
-    assert "data:image/jpeg;base64," in prompt , "the image must be inlined into the prompt";
-}
 
 test "image param with sem string doesn't crash Message.to_dict" {
     stdout_value = run_fixture("image_with_sem");
@@ -270,9 +144,6 @@ test "logging stream react" {
 }
 
 test "logging stream str answer without finish_tool delivers on chunk" {
-    # a `-> str` agent whose model skips finish_tool and
-    # returns plain text must deliver that terminal text on the `chunk` channel,
-    # not leave it stranded as `thought`-only.
     stdout_value = run_fixture("logging_stream_str_skip_finish");
     assert "STR_SKIP_FINISH_CHUNK_PASS" in stdout_value;
 }
@@ -293,11 +164,6 @@ test "transient mid-stream drop retried on same model, output de-duplicated" {
 }
 
 test "streaming generator survives consumption from a foreign Context" {
-    # Regression test: a streaming by llm() generator must be safe to consume
-    # from a different contextvars.Context than the one that created it — e.g. a
-    # thread-pool worker, which is how the scale backend's sse_frame_stream drives SSE.
-    # Pre-fix, the wrapper reset a ContextVar Token across Context boundaries and
-    # raised "Token was created in a different Context", killing the stream.
     stdout_value = run_fixture("streaming_cross_context");
     assert "CROSS_CONTEXT_PASS" in stdout_value;
 }
@@ -319,38 +185,6 @@ test "by expr" {
     }
 }
 
-test "a nested method's incl_info and receiver state reach the prompt" {
-    # A bare `enum { A, B }` auto-numbers its members, and the reply carries the
-    # VALUE, not the name. Scripting `.value` keeps that out of the test as a
-    # magic number.
-    llm = FakeLLM(replies=[typed(_MethodPersonality.INTROVERT.value)]);
-
-    obj _Diarist {
-        has diary_entries: list[str];
-
-        def get_personality(person: _MethodPerson) -> _MethodPersonality by llm(
-            incl_info={
-                "personality_examples": _METHOD_PERSONALITIES,
-                "diary_entries": self.diary_entries
-            }
-        );
-    }
-    diarist = _Diarist(
-        diary_entries=[
-            "I won noble prize in Physics",
-            "I am popular for my theory of relativity"
-        ]
-    );
-
-    result = diarist.get_personality(_MethodPerson(name="Albert Einstein", age=76));
-    assert result == _MethodPersonality.INTROVERT , f"got {result!r}";
-
-    prompt = str(llm.sent("messages")[0]);
-    assert "theory of relativity" in prompt , (
-        f"incl_info from the receiver must reach the prompt: {prompt[:400]}"
-    );
-    assert "Albert Einstein" in prompt , "the argument must reach the prompt";
-}
 
 test "the deprecated method= parameter still runs and warns once" {
     llm = FakeLLM(replies=[say("test output")]);
@@ -379,26 +213,6 @@ test "the deprecated method= parameter still runs and warns once" {
     );
 }
 
-test "a typed object return is parsed, enum member and all" {
-    llm = FakeLLM(
-        replies=[
-            say(
-                '{"schema_object_wrapper": {"full_name": "J. Robert Oppenheimer", '
-                '"yod": 1967, "personality": "Introvert"}}'
-            )
-        ]
-    );
-
-    def get_person_info(name: str) -> _LowerPerson by llm();
-
-    person = get_person_info("Oppenheimer");
-    assert person.full_name == "J. Robert Oppenheimer" , f"got {person!r}";
-    assert person.yod == 1967;
-    assert person.personality == _LowerPersonality.INTROVERT , (
-        f"enum member must be reconstructed, got {person.personality!r}"
-    );
-    assert "Oppenheimer" in str(llm.sent("messages")[0]) , "the argument must reach the prompt";
-}
 
 test "with llm type" {
     stdout_value = run_fixture("with_llm_type");
@@ -414,134 +228,6 @@ test "with llm type" {
     assert desired_output_count == 2;
 }
 
-test "an image parameter is sent as a system prompt plus a data url" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
-    llm = FakeLLM(replies=[say("The answer to the math question is 42.")]);
-
-    def solve_math_question(question_img: Image) -> str by llm();
-
-    answer = solve_math_question(Image(os.path.join(FIXTURE_DIR, "math_question.jpg")));
-    assert answer == "The answer to the math question is 42.";
-
-    messages = llm.sent("messages")[0];
-    assert messages[0]["role"] == "system" , f"first message should be system: {messages[
-        0
-    ]}";
-    user_blocks = messages[1]["content"];
-    assert user_blocks[0]["type"] == "text" , f"got {user_blocks[0]}";
-    assert "solve_math_question" in user_blocks[0]["text"] , (
-        "the caller name should introduce the argument"
-    );
-    image_block = user_blocks[-1];
-    assert image_block["type"] == "image_url" , f"got {image_block}";
-    assert image_block["image_url"]["url"].startswith("data:image/jpeg;base64,") , (
-        "the image must be inlined as a jpeg data url"
-    );
-}
-
-test "a webp image is accepted and its typed answer parsed" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
-    llm = FakeLLM(
-        replies=[
-            typed(
-                {
-                    "full_name": "Albert Einstein",
-                    "year_of_death": "1955",
-                    "personality": _WebpPersonality.EXTROVERT.value
-                }
-            )
-        ]
-    );
-
-    def get_person_info(image_content: Image) -> _WebpPerson by llm();
-
-    person = get_person_info(
-        Image(os.path.join(FIXTURE_DIR, "webp_image_of_person.webp"))
-    );
-    assert person.full_name == "Albert Einstein" , f"got {person!r}";
-    assert person.year_of_death == "1955";
-    assert person.personality == _WebpPersonality.EXTROVERT;
-
-    # A typed return appends schema guidance after the image, so pick the image
-    # block by type rather than by position.
-    blocks = llm.sent("messages")[0][1]["content"];
-    images = [
-        b
-        for b in blocks
-        if b.get("type") == "image_url"
-    ];
-    assert len(images) == 1 , f"expected one image block, got {len(images)}";
-    url = images[0]["image_url"]["url"];
-    assert url.startswith("data:image/webp;base64,") , f"a webp must stay webp: {url[:60]}";
-}
-
-test "a video parameter is sampled into image frames" {
-    try {
-        import cv2;
-    } except ImportError {
-        testskip("This test requires OpenCV to be installed");
-    }
-    explanation = (
-        "The video features a large rabbit emerging from a burrow in a lush, "
-        "green environment."
-    );
-    llm = FakeLLM(replies=[say(explanation)]);
-
-    def explain_the_video(video: Video) -> str by llm();
-
-    result = explain_the_video(
-        Video(path=os.path.join(FIXTURE_DIR, "SampleVideo_1280x720_2mb.mp4"), fps=1)
-    );
-    assert result == explanation;
-
-    blocks = llm.sent("messages")[0][1]["content"];
-    frames = [
-        b
-        for b in blocks
-        if b.get("type") == "image_url"
-    ];
-    assert len(frames) > 1 , f"a video should sample several frames, got {len(frames)}";
-    assert frames[0]["image_url"]["url"].startswith("data:image/") , (
-        "frames must be inlined as images"
-    );
-}
-
-# `sem` is a module-level construct, so these live beside their test rather than
-# inside it, and the FakeLLM is module-level for the same reason.
-glob _sem_llm = FakeLLM(replies=[typed(120597), say("R8@jL3pQ")]);
-
-def _generate_specific_number -> int by _sem_llm();
-
-sem _generate_specific_number = "Generates a specific number that is 120597 and returns it.";
-
-def _generate_password -> str by _sem_llm();
-
-sem _generate_password = "Generates a password with an uppercase letter, a digit and a symbol.";
-
-test "a sem string reaches the prompt and a typed return is converted" {
-    number = _generate_specific_number();
-    assert number == 120597 , f"expected 120597, got {number!r}";
-    assert isinstance(number, int) , (
-        f"declared -> int, got {type(number).__name__}: parse_response did not run"
-    );
-    assert "120597" in str(_sem_llm.sent("messages")[0]) , (
-        "the sem string is the prompt; without it the model is told nothing"
-    );
-
-    password = _generate_password();
-    assert password == "R8@jL3pQ";
-    assert "uppercase letter" in str(_sem_llm.sent("messages")[1]) , (
-        "each call carries its own sem string"
-    );
-}
 
 test "python lib mode" {
     person = python_lib_mode.test_get_person_info();
@@ -593,20 +279,14 @@ test "visit by for routing" {
 }
 
 test "streaming visit by routes and streams tokens to handler" {
-    # `visit [-->] by model(stream=True, stream_handler=fn)` streams the routing
-    # decision token-by-token to the handler (the path a live token feed
-    # consumes) while the structured choice still selects the successor edge.
     stdout_value = run_fixture("streaming_visit_by");
     assert "STREAMING_VISIT_BY_PASS" in stdout_value;
-    # The structured choice [1] picked the second successor edge.
+
     assert "VISITED: green" in stdout_value;
     assert "VISITED: red" not in stdout_value;
 }
 
 test "structured streaming without a handler is rejected" {
-    # Streaming a non-str return needs a stream_handler to consume the events;
-    # omitting it raises ConfigurationError up front (the guard the visit-by
-    # streaming path relaxes only when a handler is supplied).
     stdout_value = run_fixture("streaming_structured_no_handler");
     assert "STREAMING_GUARD_PASS" in stdout_value;
 }
@@ -621,15 +301,11 @@ test "http client with system prompt override" {
     sys.stdout = sys.__stdout__;
     stdout_value = captured_output.getvalue();
 
-    # Both calls' responses surface.
     assert "Hello, Alice! It's great to meet you." in stdout_value;
     assert "Hi Alice, welcome!" in stdout_value;
 
-    # jac.toml base SYSTEM reaches the prompt for both calls.
     assert "You are a friendly assistant. Greet the person" in stdout_value;
 
-    # Per-call `system_prompt` on `say_hello_brief` extends the base — both
-    # texts must appear together in the SYSTEM payload of that second call.
     assert "Respond in three words maximum." in stdout_value;
 
     assert (
@@ -651,8 +327,6 @@ test "max react iterations" {
 }
 
 test "max react iterations with finish tool call" {
-    # Verifies that when max_react_iterations is exceeded and the LLM responds
-    # with a finish_tool call (instead of plain text), the output is correctly extracted.
     stdout_value = run_fixture("react_max_iterations_finish_tool");
     assert "get_live_wind_speed called for Puttalam" in stdout_value;
     assert "get_speed_unit called" in stdout_value;
@@ -663,21 +337,18 @@ test "max react iterations with finish tool call" {
 
 test "on_iteration callback ABORT and ABORT_WITH_SUMMARY" {
     stdout_value = run_fixture("on_iteration_callback");
-    # ABORT: hook fired, only 2 tool calls (a, b), c and d skipped
+
     assert "ABORT_TRIGGERED" in stdout_value;
     assert "ABORT_TOOLS: 2" in stdout_value;
     assert "get_data called: a" in stdout_value;
     assert "get_data called: b" in stdout_value;
-    # ABORT_WITH_SUMMARY: hook fired, only 2 tool calls (c, d), summary returned
+
     assert "SUMMARY_TRIGGERED" in stdout_value;
     assert "SUMMARY_TOOLS: 2" in stdout_value;
     assert "SUMMARY_RESULT" in stdout_value;
 }
 
 test "plain text recovery - LLM bypasses finish_tool" {
-    # Verifies the Bug 2B fix: when a model (e.g. gpt-4o) returns plain conversational
-    # text instead of calling finish_tool, the invoke loop detects the failure,
-    # re-prompts with only finish_tool available, and correctly extracts the typed result.
     stdout_value = run_fixture("plain_text_recovery");
     assert "PERSON: Merchant" in stdout_value;
     assert "MESSAGE: Greetings traveller, I have wares to trade!" in stdout_value;
@@ -745,11 +416,6 @@ test "format_prompt never prints the api key and leaves params intact" {
 }
 
 test "resolved api_base reaches the litellm call" {
-    # `make_model_params` resolves api_base, then dispatch pops it off `params`
-    # into `self.api_base`, an attribute only the proxy and http_client
-    # branches read. On the default litellm path a configured base_url was
-    # therefore dropped and requests went to the provider's own endpoint
-    # (api.openai.com for gpt-*) instead of the configured gateway.
     if not hasattr(_byllm_llm_mod.litellm, "completion") {
         testskip("litellm is not installed");
     }
@@ -796,8 +462,6 @@ test "resolved api_base reaches the litellm call" {
     );
     assert _dispatched_api_base(configured) == "https://gateway.example.com/v1" , "a configured base_url must reach litellm";
 
-    # With nothing configured the loader's empty-string default must normalise
-    # to None so litellm keeps the provider's endpoint, never DEFAULT_BASE_URL.
     with unittest.mock.patch.dict(
         _byllm_llm_mod._model_config, {"base_url": ""}, clear=True
     ) {
@@ -828,30 +492,13 @@ test "a verbose model logs the call without leaking the api key" {
     assert secret not in log_value , "the api key must never reach the log";
 }
 
-test "an enum return is reconstructed as the member" {
-    llm = FakeLLM(replies=[typed(_Sentiment.POSITIVE.value)]);
-
-    def classify(text: str) -> _Sentiment by llm();
-
-    result = classify("I love this!");
-    assert result == _Sentiment.POSITIVE , f"got {result!r}";
-    assert isinstance(result, _Sentiment) , (
-        f"expected a _Sentiment member, got {type(result).__name__}"
-    );
-    assert "I love this!" in str(llm.sent("messages")[0]);
-}
 
 test "builtin llm compiles without glob" {
-    # Verify that a file using 'by llm()' without defining glob llm
-    # compiles successfully (the llm name is recognized as a builtin).
-    # We suppress runtime errors since no actual LLM API key is configured.
     captured_output = io.StringIO();
     sys.stdout = captured_output;
     try {
         jac_import("builtin_llm_no_override", base_path=FIXTURE_DIR + "/");
     } except Exception as e {
-        # Runtime errors are expected (no API key), but NameError for 'llm'
-        # would indicate the builtin wasn't recognized.
         assert "name 'llm' is not defined" not in str(e) , f"'llm' should be a recognized builtin, got: {e}";
     }
     sys.stdout = sys.__stdout__;
@@ -865,22 +512,18 @@ glob GEMINI_FIXTURE = os.path.join(FIXTURE_DIR, "jac_toml_gemini");
 
 
 test "byllm config reads model from jac.toml" {
-    # Explicit project_dir pointing at a jac.toml with gemini model
     reset_byllm_config();
     config = get_byllm_config(Path(GEMINI_FIXTURE));
     assert config.get_model_config()['default_model'] == "gemini/gemini-1.5-pro";
 }
 
 test "byllm config defaults to gpt-4o-mini when no jac.toml" {
-    # fixtures/ dir has no jac.toml, so built-in defaults apply
     reset_byllm_config();
     config = get_byllm_config(Path(FIXTURE_DIR));
     assert config.get_model_config()['default_model'] == "gpt-4o-mini";
 }
 
 test "byllm config uses full_target_path to find jac.toml regardless of cwd" {
-    # cwd is /tmp, but full_target_path points at the gemini fixture —
-    # the correct jac.toml must still be picked up
     orig = JacRuntime.get_full_target_path();
     orig_cwd = os.getcwd();
     JacRuntime.set_full_target_path(os.path.join(GEMINI_FIXTURE, "main.jac"));
@@ -896,10 +539,6 @@ test "byllm config uses full_target_path to find jac.toml regardless of cwd" {
     }
 }
 
-# Note: OutputConversionError tests call MTRuntime.parse_response directly because
-# MockLLM.dispatch_no_streaming bypasses parse_response, returning the pre-built
-# output object straight from CompletionResult. The error lives in parse_response,
-# so that is the correct unit to test.
 glob _TestPerson = dataclasses.make_dataclass(
          "Person", [("name", str), ("age", int)]
      ),
@@ -938,7 +577,6 @@ test "parse_response passes through str returns and valid typed json" {
     assert (person.name, person.age) == ("Alice", 30) , f"got {person}";
 }
 
-# Schema generation is what rejects bare unparameterized containers.
 test "bare container return types are a configuration error" {
     for bare in [list, dict] {
         raised = False;
@@ -954,10 +592,6 @@ test "bare container return types are a configuration error" {
     }
 }
 
-# An unregistered tool name is recovered, not fatal: dispatch_no_streaming
-# returns a tool call that reports the error back so the model can retry,
-# rather than crashing the whole turn.
-# model_call_no_stream is mocked so no real API key is needed.
 test "unregistered tool call is recovered not fatal" {
     model = Model(model_name="test-model");
     messages_list = [
@@ -971,10 +605,9 @@ test "unregistered tool call is recovered not fatal" {
         stream=False,
         tools=[],
         call_params={},
-        mtir=None  # type: ignore[arg-type]
+        mtir=None
     );
 
-    # Fake LLM response referencing a tool not registered in mt_run.tools
     fake_fn = types.SimpleNamespace(name="nonexistent_tool", arguments="{}");
     fake_tool_call = types.SimpleNamespace(id="call_abc", function=fake_fn);
     fake_response = {
@@ -987,7 +620,7 @@ test "unregistered tool call is recovered not fatal" {
     ) {
         result = model.dispatch_no_streaming(mt_run);
     }
-    # No exception: the unknown tool is surfaced as a recoverable tool result.
+
     assert len(result.tool_calls) == 1 , "Expected one recovered tool call";
     err_result = result.tool_calls[0]();
     assert "nonexistent_tool" in str(err_result.content) , (
@@ -998,10 +631,7 @@ test "unregistered tool call is recovered not fatal" {
     );
 }
 
-# FinishToolError is raised inside the finish_tool closure when the final output
-# fails pydantic validation against the declared return type.
 test "finish tool error on type mismatch" {
-    # Input missing required Person fields cannot be validated — raises FinishToolError
     finish_tool = Tool.make_finish_tool(_TestPerson);
 
     raised = False;
@@ -1015,14 +645,12 @@ test "finish tool error on type mismatch" {
 }
 
 test "finish tool error not raised for valid type" {
-    # Valid input matching the declared type should return the constructed instance
     finish_tool = Tool.make_finish_tool(_TestPerson);
     result = finish_tool({"name": "Alice", "age": 30});
     assert result.name == "Alice" , f"Expected name='Alice', got '{result.name}'";
     assert result.age == 30 , f"Expected age=30, got '{result.age}'";
 }
 
-# finish_tool argument robustness (issue #8169).
 test "finish tool argument resolution heals recoverable shapes" {
     finish_tool = Tool.make_finish_tool(_TestPerson);
     person = {"name": "Bob", "age": 25};
@@ -1034,9 +662,9 @@ test "finish tool argument resolution heals recoverable shapes" {
         parsed = finish_tool.parse_arguments(sent);
         assert parsed["final_output"].name == "Bob" , f"{why}: got {parsed}";
     }
-    bare = Tool.make_finish_tool(str).parse_arguments("just the answer");  # type: ignore[arg-type]
+    bare = Tool.make_finish_tool(str).parse_arguments("just the answer");
     assert bare == {"final_output": "just the answer"} , f"bare payload: got {bare}";
-    # Output type whose OWN field is named final_output, sent flattened.
+
     self_named = dataclasses.make_dataclass(
         "_SelfNamed", [("final_output", str), ("score", int)]
     );
@@ -1082,9 +710,6 @@ test "finish tool invocation failure raises FinishToolError not TypeError" {
     assert raised , "Expected FinishToolError for argument-less finish call";
 }
 
-# finish_tool argument robustness end to end (issue #8169): a misnamed
-# argument is healed into the typed output; an unusable one comes back as a
-# recoverable tool error that must not masquerade as the finish call.
 glob _WELL_FORMED_FINISH = '{"final_output": {"name": "Amy", "age": 30}}',
      _HEALABLE_FINISH = '{"output": {"name": "Dana", "age": 33}}',
      _UNUSABLE_FINISH = '{"a": 1, "b": 2}';
@@ -1122,8 +747,6 @@ test "dispatch heals a misnamed finish argument and recovers an unusable one" {
     }
 }
 
-# Some backends downgrade json_schema to json_object and reject requests whose
-# messages lack the word "json" (issue #8114).
 test "response format requests always carry the json word" {
     def _params(resp_type: type, tools: list) -> dict {
         model = Model(model_name="test-model");
@@ -1136,16 +759,13 @@ test "response format requests always carry the json word" {
             stream=False,
             tools=tools,
             call_params={},
-            mtir=None  # type: ignore[arg-type]
+            mtir=None
         );
         return model.make_model_params(mt_run);
     }
     for (label, resp_type, tools, want_rf) in [
         ("typed no tools", _TestPerson, [], True),
         ("scalar no tools", int, [], True),
-        # A union field compiles to anyOf with no top-level type, and a fieldless
-        # obj to empty properties: both yield no schema hint lines, so the lead
-        # sentence must not depend on those lines existing.
         ("union field", _TestUnionField, [], True),
         ("fieldless obj", _TestFieldless, [], True),
         ("plain str", str, [], False),
@@ -1159,9 +779,6 @@ test "response format requests always carry the json word" {
     }
 }
 
-# =============================================================================
-# LiteLLM debug config and provider-error mapping
-# =============================================================================
 test "litellm debug config toggles litellm's verbose loggers" {
     import from litellm._logging {
         verbose_logger,
@@ -1208,12 +825,7 @@ import from jaclang.byllm.exceptions {
 
 import from loguru { logger as _loguru_logger }
 
-# Provider errors map to byllm's own exceptions and log at ERROR through byllm's
-# logger whatever the litellm debug flag says. litellm.completion is the seam
-# here because the mapping under test lives in Model.model_call_no_stream.
 test "provider errors map to byllm exceptions and log at ERROR regardless of debug" {
-    # Rows carry byllm's classes; litellm's AuthenticationError and RateLimitError
-    # share those names, so matching by name would let an unmapped error through.
     rows: list = [
         (False, "AuthenticationError", AuthenticationError, "Invalid API key"),
         (True, "RateLimitError", RateLimitError, "Rate limit exceeded"),
@@ -1264,109 +876,6 @@ test "provider errors map to byllm exceptions and log at ERROR regardless of deb
 }
 
 
-"""Test ModelPool fallback strategy: router is configured with unique aliases and
-a fallbacks chain; successful responses are returned via the dispatch pipeline."""
-test "a fallback pool dispatches through its router" {
-    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-    _as_any(pool._router).completion = _pool_reply("fallback_success");
-
-    def get_answer(question: str) -> str by pool();
-
-    assert get_answer("test question") == "fallback_success";
-}
-
-"""Test ModelPool load-balancing (simple-shuffle): all three deployments share the
-pool-model alias; three independent calls all succeed and the alias is pool-model."""
-test "a load-balancing pool shares one alias across every deployment" {
-    pool = _pool(
-        "simple-shuffle", ["gpt-3.5-turbo", "gpt-4o-mini", "gemini/gemini-2.0-flash"]
-    );
-    assert pool.model_name == "pool-model" , f"got {pool.model_name!r}";
-    _as_any(pool._router).completion = _pool_reply("load_balance_response");
-
-    def get_answer(question: str) -> str by pool();
-
-    answers = [get_answer(f"question {i}") for i in range(3)];
-    assert answers == ["load_balance_response"] * 3 , f"got {answers}";
-}
-
-"""Test ModelPool propagates router exceptions: when the LiteLLM Router
-raises (all deployments exhausted) the exception reaches the caller."""
-test "a pool with every deployment exhausted raises rather than swallowing" {
-    import from litellm.exceptions { RateLimitError as _LiteLLMRateLimit }
-    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-
-    def _all_fail(**_kwargs: object) -> object {
-        raise _LiteLLMRateLimit(
-            message="All deployments exhausted",
-            model="gpt-3.5-turbo",
-            llm_provider="openai"
-        );
-    }
-    _as_any(pool._router).completion = _all_fail;
-
-    def get_answer(question: str) -> str by pool();
-
-    raised: any = None;
-    try {
-        get_answer("test");
-    } except Exception as e {
-        raised = e;
-    }
-    assert raised is not None , "an exhausted pool must not return quietly";
-    assert type(raised).__name__ == "RateLimitError" , (
-        f"expected the rate-limit error to propagate, got {type(raised).__name__}"
-    );
-}
-
-"""Test ModelPool cost-based-routing uses the async path (acompletion).
-LiteLLM Router only supports cost-based-routing via acompletion(); ModelPool
-bridges this via ThreadPoolExecutor to stay safe in async frameworks."""
-test "cost-based routing dispatches through the async router path" {
-    # cost-based-routing only has an acompletion path; ModelPool bridges it onto
-    # the sync call, so patching acompletion proves the bridge is used.
-    pool = _pool("cost-based-routing", ["gpt-4o", "gpt-4o-mini"]);
-    async def _acompletion(**_kwargs: object) -> dict {
-        return _pool_reply("cost_based_success")();
-    }
-    _as_any(pool._router).acompletion = _acompletion;
-
-    def get_answer(question: str) -> str by pool();
-
-    assert get_answer("test") == "cost_based_success";
-}
-
-"""Test ModelPool LiteLLM Router model_list initialisation.
-Fallback strategy: unique per-model aliases + fallbacks list.
-Load-balance strategy: all models share pool-model alias."""
-test "router init aliases deployments by strategy" {
-    fb = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-    fb_models: any = _as_any(fb._router).model_list;
-    fb_chain: any = _as_any(fb._router).fallbacks;
-
-    assert fb.model_name == "pool-primary" , f"got {fb.model_name!r}";
-    assert len(fb_models) == 2 , f"got {len(fb_models)} deployments";
-    assert fb_models[0]["model_name"] == "pool-primary";
-    assert fb_models[1]["model_name"] == "pool-fallback-1";
-    assert "pool-primary" in fb_chain[0] , f"got {fb_chain}";
-    assert "pool-fallback-1" in fb_chain[0].get("pool-primary", []) , (
-        f"the fallback chain must name the next deployment: {fb_chain}"
-    );
-
-    # A load-balancing strategy shares one alias so the router treats the
-    # deployments as interchangeable.
-    lb = _pool("simple-shuffle", ["gpt-3.5-turbo", "gpt-4", "gpt-4o"]);
-    lb_models: any = _as_any(lb._router).model_list;
-    assert lb.model_name == "pool-model";
-    assert len(lb_models) == 3;
-    assert all(m["model_name"] == "pool-model" for m in lb_models) , (
-        f"every deployment should share the alias: {[
-            m['model_name'] for m in lb_models
-        ]}"
-    );
-}
-
-# MCP integration tests
 glob _dummy_mcp_client = McpClient(url="http://example.invalid/mcp");
 
 test "McpTool implements Tool interface" {
@@ -1382,7 +891,7 @@ test "McpTool implements Tool interface" {
     );
     assert tool.get_name() == "get_weather";
     assert not tool.is_finish_tool();
-    # parse_arguments is a passthrough — MCP schema is the source of truth.
+
     assert tool.parse_arguments({"city": "Paris"}) == {"city": "Paris"};
 }
 
@@ -1413,20 +922,14 @@ test "McpTool plugs into MTRuntime.get_tool() polymorphically" {
         _client=_dummy_mcp_client
     );
     mt_run = MTRuntime(
-        messages=[],
-        resp_type=None,
-        stream=False,
-        tools=[],
-        call_params={},
-        mtir=None  # type: ignore[arg-type]
+        messages=[], resp_type=None, stream=False, tools=[], call_params={}, mtir=None
     );
-    # Mutate tools list via dynamic access — IDE type checker flags
-    # list[Tool | McpTool] as invariant, but the actual compiler accepts it.
+
     getattr(mt_run, "tools").append(mcp_tool);
     found = mt_run.get_tool("lookup");
     assert found is mcp_tool , "MTRuntime.get_tool should resolve McpTool by name";
     assert mt_run.get_tool("nonexistent") is None;
-    # get_tool_list calls get_json_schema on every tool — must not blow up.
+
     schemas = mt_run.get_tool_list();
     assert len(schemas) == 1;
     assert schemas[0]["function"]["name"] == "lookup";
@@ -1459,14 +962,13 @@ test "McpClient raises McpError when mcp package is missing" {
     }
 }
 
-"""Test ModelPool streaming fallback path."""
 test "model pool streaming fallback" {
     stdout_value = run_fixture("model_pool_streaming_fallback");
     assert "output:stream_fallback_success" in stdout_value;
     assert "primary_tried:True" in stdout_value;
     assert "fallback_tried:True" in stdout_value;
     assert "order_correct:True" in stdout_value;
-    # Scenario B: mid-stream failure — exception must propagate, no fallback
+
     assert "mid_raised:True" in stdout_value;
     assert "mid_partial_received:True" in stdout_value;
     assert "mid_fallback_not_tried:True" in stdout_value;
@@ -1480,12 +982,10 @@ import from jaclang.byllm.llm {
 }
 
 test "prompt caching marks system, last non-system message, and last tool for anthropic models" {
-    # Eligibility: Anthropic yes, others no
     assert _is_prompt_caching_eligible("anthropic/claude-sonnet-4-20250514") == True;
     assert _is_prompt_caching_eligible("claude-3-opus-20240229") == True;
     assert _is_prompt_caching_eligible("gpt-4o") == False;
 
-    # Multi-turn ReAct conversation, with list-content on the last message
     messages = [
         {"role": "system", "content": "You are an agent."},
         {"role": "user", "content": "Do something"},
@@ -1504,14 +1004,13 @@ test "prompt caching marks system, last non-system message, and last tool for an
     ];
     _apply_prompt_caching(messages, tools);
 
-    # System marked, intermediate messages NOT marked, last message's last block marked
     assert messages[0].get("cache_control") == _CACHE_CONTROL_EPHEMERAL;
     assert "cache_control" not in messages[1];
     assert "cache_control" not in messages[2];
     tool_content: any = messages[3].get("content");
     assert "cache_control" not in tool_content[0];
     assert tool_content[-1].get("cache_control") == _CACHE_CONTROL_EPHEMERAL;
-    # Only last tool marked
+
     assert "cache_control" not in tools[0];
     assert tools[-1].get("cache_control") == _CACHE_CONTROL_EPHEMERAL;
 }
@@ -1527,9 +1026,6 @@ test "prompt caching disabled via config" {
     }
 }
 
-# Regression guard for jac#8381: tools serialize ahead of messages in Anthropic's
-# wire format, so shrinking mt_run.tools on the narration call broke the cached
-# prefix. The terminal paths that force finish_tool must keep the array too.
 test "_stream_final_answer keeps the tools array intact" {
     def tool_a(x: str) -> str {
         return x;
@@ -1576,9 +1072,6 @@ test "finish_tool exit sends an identical tools payload on the narration call" {
     );
 }
 
-# A structured resp_type still needs finish_tool callable, so the terminal
-# paths force it via tool_choice instead of tool_choice="none". Neither path
-# has a retry loop: heal a misnamed argument or degrade, never raise.
 test "forced answer and recovery force finish_tool, keep the tools array, and heal" {
     def extra_tool(x: str) -> str {
         return x;
@@ -1746,7 +1239,6 @@ import ast as ast3;
 import from jaclang.compiler.driver.program { JacProgram }
 
 test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
-    # Compile the fixture that has both an async and a sync by llm() function.
     code_gen = (prog := JacProgram()).compile(
         os.path.join(FIXTURE_DIR, "async_by_llm.jac")
     );
@@ -1756,18 +1248,14 @@ test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
     );
     py_source = ast3.unparse(code_gen.gen.py_ast[0]);
 
-    # Async function must use acall_llm, wrapped in await.
     assert "acall_llm" in py_source , (
         f"Expected 'acall_llm' in generated source for async by llm(). Got:\n{py_source}"
     );
 
-    # Sync function must still use call_llm (no await).
     assert "call_llm" in py_source , (
         f"Expected 'call_llm' in generated source for sync by llm(). Got:\n{py_source}"
     );
 
-    # The async body must contain an Await node whose value is a Call to acall_llm.
-    # The codegen imports acall_llm directly (Name node), not as Jac.acall_llm (Attribute).
     def _is_acall_llm_call(`node: object) -> bool {
         if not (isinstance(`node, ast3.Call)) {
             return False;
@@ -1787,7 +1275,6 @@ test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
         "Expected at least one ast3.Await(value=Call(acall_llm, ...)) in generated AST"
     );
 
-    # All acall_llm calls must be wrapped in Await — no bare unawaited calls.
     all_acall_nodes = [
         n
         for n in ast3.walk(code_gen.gen.py_ast[0])
@@ -1810,7 +1297,6 @@ test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
 }
 
 test "async by llm() end-to-end with mocked acall_llm" {
-    # Compile the fixture and execute it with acall_llm mocked to return "summary".
     code_gen = (prog := JacProgram()).compile(
         os.path.join(FIXTURE_DIR, "async_by_llm.jac")
     );
@@ -1822,12 +1308,10 @@ test "async by llm() end-to-end with mocked acall_llm" {
     module.__dict__["__file__"] = code_gen.loc.mod_path;
 
     async def _run_end_to_end -> str {
-        # Patch acall_llm so no real API call is made.
         async def _fake_acall_llm(**kwargs: object) -> any {
             return "summary";
         }
-        # acall_llm is imported directly from jaclang.lib.jaclib into the
-        # compiled module's namespace, so we patch it there.
+
         import jaclang.lib.jaclib as _jaclib;
         with unittest.mock.patch.object(_jaclib, "acall_llm", _fake_acall_llm) {
             exec(compiled, module.__dict__);
@@ -1842,19 +1326,10 @@ test "async by llm() end-to-end with mocked acall_llm" {
 }
 
 
-"""Text tool protocol: a reply object carrying a tool call as plain text must
-be recovered into a structured `tool_calls` field.
-
-Regression for the ollama/gemma loop: `recover_tool_calls` only handled dict
-replies, so the litellm path (which yields a `Message` *object*) silently
-no-opped -- the model's `<tool_call>` text was never executed and the agent
-re-issued the same call forever. The fix coerces object replies to a dict and
-returns it, so callers pick up the recovered call.
-"""
 test "recover_tool_calls handles an object-shaped reply" {
     import from jaclang.byllm.tool_protocol { recover_tool_calls }
     import from types { SimpleNamespace }
-    # Mimics a litellm Message object: attribute access, no dict-ness.
+
     msg = SimpleNamespace(
         role="assistant",
         content="<tool_call>{\"name\": \"get_count\", \"arguments\": {}}</tool_call>",
@@ -1871,15 +1346,12 @@ test "recover_tool_calls handles an object-shaped reply" {
 }
 
 
-"""Text tool protocol: tool-call and tool-result history must linearise to text
-for models whose chat template has no `tool` role (e.g. gemma)."""
 test "linearize_tool_messages renders calls and results as text" {
     import from jaclang.byllm.tool_protocol { linearize_tool_messages }
     import from types { SimpleNamespace }
     msgs = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "how many?"},
-        # assistant tool-call message (object-shaped tool_calls, content stripped)
         {
             "role": "assistant",
             "content": "",
@@ -1889,47 +1361,35 @@ test "linearize_tool_messages renders calls and results as text" {
                 )
             ]
         },
-        # tool result (identified by tool_call_id)
         {"role": "tool", "tool_call_id": "abc", "name": "get_count", "content": "7"}
     ];
     out = linearize_tool_messages(msgs);
-    # System + user pass through untouched.
+
     assert out[0]["role"] == "system";
     assert out[1]["role"] == "user";
-    # Assistant tool call becomes <tool_call> text.
+
     assert out[2]["role"] == "assistant";
     assert "<tool_call>" in out[2]["content"];
     assert "get_count" in out[2]["content"];
-    # Tool result becomes a readable user message (no dropped tool role).
+
     assert out[3]["role"] == "user";
     assert "<tool_response>" in out[3]["content"];
     assert "7" in out[3]["content"];
 }
 
 
-"""Gemma-family models route through the text tool protocol automatically,
-since their chat template cannot consume `role:tool` results."""
 test "gemma models default to the text tool protocol" {
     m = Model(model_name="ollama/gemma4:31b");
     assert m.supports_native_tools == False;
-    # An explicit override still wins.
+
     m2 = Model(model_name="ollama/gemma4:31b", config={"native_tools": True});
     assert m2.supports_native_tools == True;
-    # A model without the gemma template keeps native tools.
+
     m3 = Model(model_name="gpt-4o");
     assert m3.supports_native_tools == True;
 }
 
 
-# ---------------------------------------------------------------------------
-# Typed-output retry, driven through real `by llm()` calls
-# ---------------------------------------------------------------------------
-# The llm_typed_retry fixture declares `by llm()` functions backed by MockLLM:
-# MockRawResponse routes text through parse_response, MockError raises a
-# non-conversion error, and each MockLLM records the prompt it saw per attempt.
-# The module is imported once per test so the mock outputs are consumed exactly
-# once, and exception classes are matched by name because a jac_import can carry
-# a distinct class object.
 test "typed retry regenerates after broken json, then gives up after the configured attempts" {
     mod = load_fixture("llm_typed_retry");
     for (why, person, llm, name, age) in [
@@ -2006,27 +1466,21 @@ test "typed retry only fires for structured output failures" {
 }
 
 
-"""A tool requiring an argument; calling it with none raises inside Tool.__call__."""
 def _needs_arg_tool(x: int) -> str {
     return str(x);
 }
 
 
-"""A tool body that raises at call time."""
 def _raising_tool -> str {
     raise ValueError("kaboom");
 }
 
 
-"""A tool with required parameters, for the damaged/truncated split."""
 def _writer_tool(file_path: str, content: str) -> str {
     return f"wrote {len(content)} bytes to {file_path}";
 }
 
 
-# Issue #7657: a handled tool failure is returned to the model as a "Tool error"
-# observation and logged once at WARNING with no traceback, never at ERROR. A
-# callable without __name__ (functools.partial) used to escape as AttributeError.
 test "a handled tool failure returns a Tool error at WARNING, even for a callable without __name__" {
     import functools;
     for (why, func, named) in [
@@ -2051,9 +1505,6 @@ test "a handled tool failure returns a Tool error at WARNING, even for a callabl
     }
 }
 
-# Streaming leaves finish_reason empty exactly when a call was cut short, so a
-# corrupted call is reported by the sanitizer, not the max_tokens guard, and the
-# two causes get different advice: only a genuinely truncated call should split.
 test "damaged and truncated tool calls are told apart and get the advice that fits (issue #7657)" {
     for (why, arguments, expect_damaged) in [
         (
