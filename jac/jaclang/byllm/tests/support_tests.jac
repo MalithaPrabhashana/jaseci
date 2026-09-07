@@ -527,3 +527,13 @@ def need(module: str, package: str = "") {
         testskip(f"This test requires {package or module} to be installed");
     }
 }
+
+"""The whole conversation of call `n` as one string, for `in` assertions.
+
+Use it when the question is whether something reached the model at all (a sem
+string, an incl_info example, an argument). When the question is about structure,
+use roles(), user_blocks() or media_blocks() instead.
+"""
+def prompt_text(llm: FakeLLM | Script, n: int = 0) -> str {
+    return str(sent_messages(llm, n));
+}

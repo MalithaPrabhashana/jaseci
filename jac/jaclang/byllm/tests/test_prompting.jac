@@ -1,4 +1,11 @@
-import from support_tests { FakeLLM, say, typed }
+"""What byLLM puts in the prompt, and what it makes of the reply.
+
+sem strings, incl_info, temperature and receiver state on the way out; typed
+returns, enums and scalars on the way back. Every test asserts on both
+directions, which is the thing a fixture-and-stdout test could not do.
+"""
+
+import from support_tests { FakeLLM, prompt_text, say, typed }
 
 
 enum _Sentiment { POSITIVE, NEGATIVE, NEUTRAL }
@@ -73,7 +80,7 @@ test "a method's own object reaches the prompt as context" {
     average = student.get_average();
     assert average == 86.75 , f"a float return must be converted, got {average!r}";
     assert isinstance(average, float) , f"expected float, got {type(average).__name__}";
-    prompt = str(llm.sent("messages")[0]);
+    prompt = prompt_text(llm);
     assert "Alice" in prompt , "the receiver's fields must reach the prompt";
     assert "99" in prompt , f"the marks must reach the prompt: {prompt[:400]}";
 }
@@ -85,13 +92,13 @@ test "a sem string reaches the prompt and a typed return is converted" {
     assert isinstance(number, int) , (
         f"declared -> int, got {type(number).__name__}: parse_response did not run"
     );
-    assert "120597" in str(_sem_llm.sent("messages")[0]) , (
+    assert "120597" in prompt_text(_sem_llm) , (
         "the sem string is the prompt; without it the model is told nothing"
     );
 
     password = _generate_password();
     assert password == "R8@jL3pQ";
-    assert "uppercase letter" in str(_sem_llm.sent("messages")[1]) , (
+    assert "uppercase letter" in prompt_text(_sem_llm, 1) , (
         "each call carries its own sem string"
     );
 }
@@ -115,7 +122,7 @@ test "a typed object return is parsed, enum member and all" {
     assert person.personality == _LowerPersonality.INTROVERT , (
         f"enum member must be reconstructed, got {person.personality!r}"
     );
-    assert "Oppenheimer" in str(llm.sent("messages")[0]) , "the argument must reach the prompt";
+    assert "Oppenheimer" in prompt_text(llm) , "the argument must reach the prompt";
 }
 
 
@@ -142,7 +149,7 @@ test "a nested method's incl_info and receiver state reach the prompt" {
     result = diarist.get_personality(_MethodPerson(name="Albert Einstein", age=76));
     assert result == _MethodPersonality.INTROVERT , f"got {result!r}";
 
-    prompt = str(llm.sent("messages")[0]);
+    prompt = prompt_text(llm);
     assert "theory of relativity" in prompt , (
         f"incl_info from the receiver must reach the prompt: {prompt[:400]}"
     );
@@ -160,5 +167,5 @@ test "an enum return is reconstructed as the member" {
     assert isinstance(result, _Sentiment) , (
         f"expected a _Sentiment member, got {type(result).__name__}"
     );
-    assert "I love this!" in str(llm.sent("messages")[0]);
+    assert "I love this!" in prompt_text(llm);
 }

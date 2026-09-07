@@ -1,11 +1,24 @@
+"""ModelPool routing: aliasing, the fallback chain, and the async bridge.
+
+A pool never calls its members' dispatch; it dispatches through a litellm Router.
+So the seam here is `router.completion`, and the pool itself is the real thing.
+"""
+
 import from jaclang.byllm.lib { Model, ModelPool }
 
 
-def _as_any(v: any) -> any {
-    return v;
+"""The pool's litellm Router, as an untyped handle.
+
+ModelPool builds it in postinit and never exposes it nominally, so a test that
+patches or inspects it goes through here instead of casting at each site.
+"""
+def router(pool: ModelPool) -> any {
+    return pool._router;
 }
 
 
+"""A litellm Router completion that answers `content`, standing in for a live
+deployment."""
 def _pool_reply(content: str) -> Callable {
     def _completion(**_kwargs: object) -> dict {
         return {
@@ -37,7 +50,7 @@ def _pool(strategy: str, names: list[str]) -> ModelPool {
 
 test "a fallback pool dispatches through its router" {
     pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-    _as_any(pool._router).completion = _pool_reply("fallback_success");
+    router(pool).completion = _pool_reply("fallback_success");
 
     def get_answer(question: str) -> str by pool();
 
@@ -50,7 +63,7 @@ test "a load-balancing pool shares one alias across every deployment" {
         "simple-shuffle", ["gpt-3.5-turbo", "gpt-4o-mini", "gemini/gemini-2.0-flash"]
     );
     assert pool.model_name == "pool-model" , f"got {pool.model_name!r}";
-    _as_any(pool._router).completion = _pool_reply("load_balance_response");
+    router(pool).completion = _pool_reply("load_balance_response");
 
     def get_answer(question: str) -> str by pool();
 
@@ -70,7 +83,7 @@ test "a pool with every deployment exhausted raises rather than swallowing" {
             llm_provider="openai"
         );
     }
-    _as_any(pool._router).completion = _all_fail;
+    router(pool).completion = _all_fail;
 
     def get_answer(question: str) -> str by pool();
 
@@ -92,7 +105,7 @@ test "cost-based routing dispatches through the async router path" {
     async def _acompletion(**_kwargs: object) -> dict {
         return _pool_reply("cost_based_success")();
     }
-    _as_any(pool._router).acompletion = _acompletion;
+    router(pool).acompletion = _acompletion;
 
     def get_answer(question: str) -> str by pool();
 
@@ -102,8 +115,8 @@ test "cost-based routing dispatches through the async router path" {
 
 test "router init aliases deployments by strategy" {
     fb = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-    fb_models: any = _as_any(fb._router).model_list;
-    fb_chain: any = _as_any(fb._router).fallbacks;
+    fb_models: any = router(fb).model_list;
+    fb_chain: any = router(fb).fallbacks;
 
     assert fb.model_name == "pool-primary" , f"got {fb.model_name!r}";
     assert len(fb_models) == 2 , f"got {len(fb_models)} deployments";
@@ -115,7 +128,7 @@ test "router init aliases deployments by strategy" {
     );
 
     lb = _pool("simple-shuffle", ["gpt-3.5-turbo", "gpt-4", "gpt-4o"]);
-    lb_models: any = _as_any(lb._router).model_list;
+    lb_models: any = router(lb).model_list;
     assert lb.model_name == "pool-model";
     assert len(lb_models) == 3;
     assert all(m["model_name"] == "pool-model" for m in lb_models) , (
