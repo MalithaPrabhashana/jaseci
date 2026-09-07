@@ -28,7 +28,7 @@ import from unittest { mock }
 import from jaclang { JacRuntimeInterface as Jac }
 import from jaclang.byllm.llm { BaseLLM }
 import from jaclang.byllm.mtir { MTRuntime }
-import from jaclang.byllm.types { Message, MessageRole, Tool }
+import from jaclang.byllm.types { Message, MessageRole, StreamEvent, Tool }
 
 glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures"),
      TOKENS: dict = {
@@ -530,4 +530,39 @@ structure use roles(), user_blocks() or media_blocks() instead.
 """
 def prompt_text(llm: FakeLLM | Script, n: int = 0) -> str {
     return str(sent_messages(llm, n));
+}
+
+
+"""Drain a `logging=True` stream, checking every item is a StreamEvent."""
+def stream_events(stream: any) -> list {
+    out: list = [];
+    for e in stream {
+        assert isinstance(e, StreamEvent) , (
+            f"a logging stream yields StreamEvent, got {type(e).__name__}"
+        );
+        out.append(e);
+    }
+    return out;
+}
+
+
+"""The events of one type, in order."""
+def events_of(events: list, kind: str) -> list {
+    return [
+        e
+        for e in events
+        if e.event_type == kind
+    ];
+}
+
+
+"""The event types in order, for ordering assertions."""
+def event_types(events: list) -> list[str] {
+    return [e.event_type for e in events];
+}
+
+
+"""The text delivered on the chunk channel, reassembled."""
+def chunk_text(events: list) -> str {
+    return "".join([e.data.get("content", "") for e in events_of(events, "chunk")]);
 }

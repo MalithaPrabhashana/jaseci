@@ -80,21 +80,6 @@ test "streaming with react" {
     assert "Test passed!" in stdout_value;
 }
 
-test "logging stream no tools" {
-    stdout_value = run_fixture("logging_stream_no_tools");
-    assert "NO_TOOLS_PASS" in stdout_value;
-}
-
-test "logging stream react" {
-    stdout_value = run_fixture("logging_stream_react");
-    assert "REACT_LOGGING_PASS" in stdout_value;
-}
-
-test "logging stream str answer without finish_tool delivers on chunk" {
-    stdout_value = run_fixture("logging_stream_str_skip_finish");
-    assert "STR_SKIP_FINISH_CHUNK_PASS" in stdout_value;
-}
-
 
 test "streaming + conversation persists assistant message and emits dicts" {
     stdout_value = run_fixture("streaming_conversation");
