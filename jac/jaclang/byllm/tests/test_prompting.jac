@@ -249,3 +249,59 @@ test "temperature is sent when the caller sets one" {
         'temperature'
     )!r}";
 }
+
+
+obj TypedPerson {
+    has name: str,
+        dob: str,
+        age: int;
+}
+
+obj TypedUniversity {
+    has name: str,
+        location: str,
+        departments: list[TypedUniversity.Department] = [];
+
+    obj Department {
+        has name: str,
+            head: TypedPerson;
+    }
+}
+
+
+test "a nested obj return is parsed, including the obj it nests" {
+    # University.Department nests a Person. Both levels have to come back as
+    # real instances, and the same call has to work twice.
+    person = {"name": "Jason Mars", "dob": "1994-01-01", "age": 30};
+    llm = FakeLLM(
+        replies=[
+            typed({"name": "Albert Einstein", "dob": "14/03/1879", "age": 76}),
+            typed({"name": "Computer Science", "head": person}),
+            typed({"name": "Computer Science", "head": person})
+        ]
+    );
+
+    def make_person(name: str) -> TypedPerson by llm();
+
+    def make_department(name: str) -> TypedUniversity.Department by llm();
+
+    einstein = make_person("Albert Einstein");
+    assert isinstance(einstein, TypedPerson) , f"got {type(einstein).__name__}";
+    assert einstein.dob == "14/03/1879" , f"got {einstein!r}";
+
+    umich = TypedUniversity(name="University of Michigan", location="Ann Arbor");
+    for i in range(2) {
+        dept = make_department("Computer Science");
+        assert isinstance(dept, TypedUniversity.Department) , (
+            f"call {i}: got {type(dept).__name__}"
+        );
+        assert isinstance(dept.head, TypedPerson) , (
+            f"call {i}: the nested obj must be an instance too, got {type(
+                dept.head
+            ).__name__}"
+        );
+        assert dept.head.name == "Jason Mars" , f"call {i}: got {dept.head!r}";
+        umich.departments.append(dept);
+    }
+    assert len(umich.departments) == 2;
+}

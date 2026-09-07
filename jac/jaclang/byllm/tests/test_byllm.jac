@@ -121,21 +121,6 @@ test "the deprecated method= parameter still runs and warns once" {
 }
 
 
-test "with llm type" {
-    stdout_value = run_fixture("with_llm_type");
-    assert "14/03/1879" in stdout_value;
-    assert (
-        'University (University) (obj) = type(__module__="with_llm_type", __doc__=None, '
-        "_jac_entry_funcs_`=[`], _jac_exit_funcs_=[], __init__=function(__wrapped__=function()))"
-        not in stdout_value
-    );
-    desired_output_count = stdout_value.count(
-        "Person(name='Jason Mars', dob='1994-01-01', age=30)"
-    );
-    assert desired_output_count == 2;
-}
-
-
 test "python lib mode" {
     person = python_lib_mode.test_get_person_info();
     assert "Alan Turing" in person.name;
