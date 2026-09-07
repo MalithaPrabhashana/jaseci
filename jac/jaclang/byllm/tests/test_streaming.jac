@@ -8,8 +8,12 @@ import asyncio;
 import contextvars;
 import from jaclang.byllm.exceptions { ConfigurationError }
 import from jaclang.byllm.telemetry { _current_invocation_id }
+import from jaclang.byllm.lib { Model }
 import from support_tests {
     FakeLLM,
+    fail,
+    mk_run,
+    scripted,
     call,
     chunk_text,
     event_types,
@@ -220,4 +224,96 @@ test "a stream survives being consumed from a foreign context" {
             f"{label}: the invocation id leaked into the caller's Context"
         );
     }
+}
+
+
+test "a mid-stream drop is retried only when the error is transient" {
+    import from litellm.exceptions { APIConnectionError, AuthenticationError }
+    transient = APIConnectionError(
+        message="incomplete chunked read", llm_provider="anthropic", model="m"
+    );
+    permanent = AuthenticationError(
+        message="bad key", llm_provider="anthropic", model="m"
+    );
+
+    # (label, scripted turns, expected model calls, expected resets, error that
+    #  should escape, text the caller should end up with)
+    for (label, replies, calls, resets, escapes, text) in [
+        (
+            "transient drop recovers on the same model",
+            [
+                fail(transient, content="PARTIAL-DISCARDED ", after=1),
+                say("Hello world")
+            ],
+            2,
+            1,
+            None,
+            "Hello world"
+        ),
+        (
+            "a non-transient error is not retried",
+            [fail(permanent)],
+            1,
+            0,
+            "AuthenticationError",
+            None
+        ),
+        (
+            "an unending transient error is bounded, then propagates",
+            [fail(transient), fail(transient), fail(transient), fail(transient)],
+            3,
+            2,
+            "APIConnectionError",
+            None
+        )
+    ] {
+        model = Model(model_name="gpt-4o-mini");
+        mt = mk_run(stream=True);
+        raised: any = None;
+        with scripted(model, replies) as script {
+            try {
+                events = list(model._invoke_streaming(mt));
+            } except Exception as e {
+                raised = e;
+            }
+        }
+        assert len(script.seen) == calls , (
+            f"{label}: expected {calls} model calls, got {len(script.seen)}"
+        );
+        assert mt._stream_reset_count == resets , (
+            f"{label}: expected {resets} stream resets, got {mt._stream_reset_count}"
+        );
+        if escapes is None {
+            assert raised is None , f"{label}: unexpected {raised!r}";
+            # A reset discards what was already delivered, so the caller sees
+            # the retry's output once, not the partial prepended to it.
+            buf: list = [];
+            for ev in events {
+                if ev.event_type == "stream_reset" {
+                    buf = [];
+                } elif ev.event_type == "chunk" {
+                    buf.append(ev.data.get("content", ""));
+                }
+            }
+            assert "stream_reset" in [ev.event_type for ev in events] , (
+                f"{label}: a retry must surface stream_reset"
+            );
+            assert "".join(buf) == text , f"{label}: got {''.join(buf)!r}";
+        } else {
+            assert type(raised).__name__ == escapes , (
+                f"{label}: expected {escapes}, got {type(raised).__name__}"
+            );
+        }
+    }
+}
+
+
+test "the inter-chunk read timeout is set for streaming only" {
+    model = Model(model_name="gpt-4o-mini");
+    streaming = model.make_model_params(mk_run(stream=True));
+    assert "timeout" in streaming , "a stream needs a read timeout to fail fast";
+    assert streaming["timeout"].read == 90.0 , f"got {streaming['timeout'].read}";
+    assert "timeout" not in model.make_model_params(mk_run(stream=False)) , (
+        "a non-streaming call must not inherit the inter-chunk timeout"
+    );
 }

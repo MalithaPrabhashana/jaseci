@@ -75,17 +75,6 @@ test "streaming with react" {
 }
 
 
-test "streaming + conversation persists assistant message and emits dicts" {
-    stdout_value = run_fixture("streaming_conversation");
-    assert "STREAM_CONV_PASS" in stdout_value;
-}
-
-test "transient mid-stream drop retried on same model, output de-duplicated" {
-    stdout_value = run_fixture("stream_retry");
-    assert "STREAM_RETRY_PASS" in stdout_value;
-}
-
-
 test "by expr" {
     stdout_value = run_fixture("by_expr");
     expected_lines = (
