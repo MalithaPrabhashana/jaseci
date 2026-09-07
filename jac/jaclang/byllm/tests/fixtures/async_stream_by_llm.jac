@@ -1,7 +1,6 @@
 """Fixture for jac#8932: async by llm(stream=True) over a stubbed provider.
 
-Self-contained so no network or api key is needed, and acall_llm is NOT mocked,
-so the whole chain runs: codegen -> Jac.acall_llm -> ainvoke -> adispatch_streaming.
+acall_llm is deliberately not mocked, so the whole chain runs.
 """
 
 import litellm;
