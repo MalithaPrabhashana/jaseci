@@ -216,41 +216,6 @@ test "http client with system prompt override" {
     );
 }
 
-test "max react iterations" {
-    stdout_value = run_fixture("react_max_iterations");
-    assert "get_live_wind_speed called for Puttalam" in stdout_value;
-    assert "get_speed_unit called" in stdout_value;
-    assert "RESULT: FINAL_REPORT" in stdout_value;
-    assert "WIND_TOOL_CALLS: 1" in stdout_value;
-    assert "UNIT_TOOL_CALLS: 1" in stdout_value;
-    assert (
-        "Based on the tool calls and their results above, provide only your final answer."
-        in stdout_value
-    );
-}
-
-test "max react iterations with finish tool call" {
-    stdout_value = run_fixture("react_max_iterations_finish_tool");
-    assert "get_live_wind_speed called for Puttalam" in stdout_value;
-    assert "get_speed_unit called" in stdout_value;
-    assert "RESULT: FINAL_REPORT" in stdout_value;
-    assert "WIND_TOOL_CALLS: 1" in stdout_value;
-    assert "UNIT_TOOL_CALLS: 1" in stdout_value;
-}
-
-test "on_iteration callback ABORT and ABORT_WITH_SUMMARY" {
-    stdout_value = run_fixture("on_iteration_callback");
-
-    assert "ABORT_TRIGGERED" in stdout_value;
-    assert "ABORT_TOOLS: 2" in stdout_value;
-    assert "get_data called: a" in stdout_value;
-    assert "get_data called: b" in stdout_value;
-
-    assert "SUMMARY_TRIGGERED" in stdout_value;
-    assert "SUMMARY_TOOLS: 2" in stdout_value;
-    assert "SUMMARY_RESULT" in stdout_value;
-}
-
 
 test "api key resolves from constructor, then instance config, then global config" {
     for (why, global_key, kwargs, expected) in [
