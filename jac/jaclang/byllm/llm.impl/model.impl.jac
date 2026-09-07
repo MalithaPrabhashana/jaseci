@@ -111,7 +111,7 @@ impl Model.ainvoke(mt_run: MTRuntime) -> object {
     logging_stream = mt_run.stream and mt_run.call_params.get("logging", False);
     no_tools = len(mt_run.tools) == 0;
     handled_directly = no_tools and not logging_stream;
-    delegate: any = self._mock_delegate or self._local_delegate;
+    delegate: BaseLLM | None = self._mock_delegate or self._local_delegate;
     if not handled_directly {
         if delegate {
             return await delegate.ainvoke(mt_run);
