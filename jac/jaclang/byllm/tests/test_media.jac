@@ -1,7 +1,6 @@
 """Image and video inputs: how a media argument reaches the model.
 
-Each test asserts on the message blocks byLLM actually sent, so a change in how
-media is encoded fails here instead of passing on a substring of a log line.
+Assert on the message blocks byLLM actually sent, not on a rendered string.
 """
 
 import os;

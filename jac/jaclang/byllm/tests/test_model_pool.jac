@@ -1,17 +1,14 @@
 """ModelPool routing: aliasing, the fallback chain, and the async bridge.
 
-A pool never calls its members' dispatch; it dispatches through a litellm Router.
-So the seam here is `router.completion`, and the pool itself is the real thing.
+A pool dispatches through a litellm Router, never through its members. Fake
+`router.completion` and leave the pool itself real.
 """
 
 import from jaclang.byllm.lib { Model, ModelPool }
 
 
-"""The pool's litellm Router, as an untyped handle.
-
-ModelPool builds it in postinit and never exposes it nominally, so a test that
-patches or inspects it goes through here instead of casting at each site.
-"""
+"""The pool's litellm Router, as an untyped handle. ModelPool never exposes it
+nominally, so patch or inspect it through here rather than casting at each site."""
 def router(pool: ModelPool) -> any {
     return pool._router;
 }

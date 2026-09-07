@@ -1,7 +1,6 @@
 """The `conversation=<list>` kwarg: what byLLM writes back into the caller's list.
 
-The caller passes a list and byLLM appends to it in place, so these tests assert
-on that list directly. Scaffolding (the system prompt) and byLLM's own finish_tool
+byLLM appends to the caller's list in place. The system prompt and finish_tool
 plumbing are filtered out on the way; a real tool result is not.
 """
 

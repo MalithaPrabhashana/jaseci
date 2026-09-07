@@ -1,10 +1,9 @@
 """The one fake model for the byLLM suite.
 
-A test scripts what the model says, turn by turn, and every real dispatch path
-in BaseLLM runs unchanged: only `model_call_no_stream` and
-`model_call_with_stream` (and their async twins on `Model`) are replaced.
-Streams are real litellm chunk objects, so `stream_chunk_builder`, usage, and
-cost attach exactly as they do in production.
+Script what the model says, turn by turn. Only `model_call_no_stream` and
+`model_call_with_stream` (and their async twins on `Model`) are replaced, so
+every other dispatch path is the real code and streams carry real litellm
+chunks, with usage and cost attaching as they do in production.
 
     llm = FakeLLM(replies=[call("lookup", {"q": "x"}), say("done")]);
     def task(q: str) -> str by llm(tools=[lookup]);
@@ -62,15 +61,12 @@ def say(content: str, usage: dict | None = None, finish_reason: str = "") -> Rep
 }
 
 
-"""A reply carrying a typed value.
+"""A reply carrying a typed value, wrapped in the envelope parse_response expects.
 
-Every non-`str` return type is parsed out of a `schema_object_wrapper` envelope, scalars
-included: a bare "120597" raises OutputConversionError for a `-> int`. This writes the
-envelope so a test can script the value it means.
+Every non-`str` return needs it, scalars included: a bare "120597" raises
+OutputConversionError for a `-> int`. An enum takes the member's value, not its name.
 
-    typed(120597)                      # -> int
-    typed({"name": "Ada", "age": 36})  # -> a dataclass or obj
-    typed(["a", "b"])                  # -> list[str]
+    typed(120597);  typed({"name": "Ada"});  typed(Colour.RED.value);
 """
 def typed(value: object, usage: dict | None = None) -> Reply {
     import json;
@@ -487,9 +483,8 @@ def roles(llm: FakeLLM | Script, n: int = 0) -> list[str] {
 
 """The content blocks of the user turn of call `n`.
 
-A multimodal request assembles the user message into a list of blocks rather than
-a string, so this is where an argument, an image or a video frame lands. A
-text-only request is normalised to one text block so callers can treat both alike.
+A multimodal request lands its argument, image or video frames here. A text-only
+request is normalised to one text block, so callers can treat both alike.
 """
 def user_blocks(llm: FakeLLM | Script, n: int = 0) -> list {
     content = sent_messages(llm, n)[1]["content"];
@@ -530,9 +525,8 @@ def need(module: str, package: str = "") {
 
 """The whole conversation of call `n` as one string, for `in` assertions.
 
-Use it when the question is whether something reached the model at all (a sem
-string, an incl_info example, an argument). When the question is about structure,
-use roles(), user_blocks() or media_blocks() instead.
+Use it to ask whether something reached the model at all. For questions about
+structure use roles(), user_blocks() or media_blocks() instead.
 """
 def prompt_text(llm: FakeLLM | Script, n: int = 0) -> str {
     return str(sent_messages(llm, n));

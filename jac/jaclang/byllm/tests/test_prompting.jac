@@ -1,8 +1,7 @@
 """What byLLM puts in the prompt, and what it makes of the reply.
 
 sem strings, incl_info, temperature and receiver state on the way out; typed
-returns, enums and scalars on the way back. Every test asserts on both
-directions, which is the thing a fixture-and-stdout test could not do.
+returns, enums and scalars on the way back. Assert on both directions.
 """
 
 import from support_tests { FakeLLM, call, prompt_text, roles, say, tool_names, typed }
