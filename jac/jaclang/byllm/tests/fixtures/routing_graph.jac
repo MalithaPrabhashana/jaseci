@@ -1,10 +1,11 @@
 """Program under test for `visit ... by llm()` routing.
 
 Shape only: no model, no entry block, no prints. The test assigns `llm`, builds
-the graph it needs and spawns a walker.
+its graph and spawns a walker.
 
-`router` traverses edges with `[-->]`; `picker` routes over an arbitrary node
-list, which does not have to be adjacent; `collector` selects every candidate.
+`router` follows `[-->]`, `picker` takes an arbitrary node list that need not be
+adjacent, `collector` selects every candidate, `stream_router` streams the
+decision, `leaky` passes routing-control params alongside a real one.
 """
 
 glob llm: any = None;

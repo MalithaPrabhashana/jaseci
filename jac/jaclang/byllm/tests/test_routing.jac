@@ -1,8 +1,8 @@
 """`visit ... by llm()`: what the routing prompt offers, and what gets visited.
 
-The model here reads the prompt and chooses from it, rather than being handed a
-scripted answer. Handles are generated from the candidate set, so scripting them
-is brittle, and reading them proves the prompt carries what a chooser needs.
+The model reads the prompt and chooses from it rather than being handed a
+scripted answer. Handles are generated from the candidate set, so read them back
+with routing_candidates() instead of writing them out.
 """
 
 import os;
@@ -166,11 +166,10 @@ test "a supervisor routes to the agent whose speciality matches the request" {
     # second.
     poem = "In circuits bright, with purpose clear, agentic minds we hold dear.";
 
-    """Route on what the user asked for.
+    """Route on the request, not the whole prompt.
 
-    Reads the request out of the prompt rather than matching the whole thing:
-    the handles are derived from node type names, so a bare `"poem" in prompt`
-    is true for the math request too, because PoemAgent is on the candidate list.
+    Handles come from node type names, so `"poem" in prompt` is true for the
+    math request too: PoemAgent is on the candidate list.
     """
     def by_topic(candidates: list, prompt: str) -> list {
         import re;

@@ -569,10 +569,10 @@ def chunk_text(events: list) -> str {
 
 """The candidate handles offered in a routing prompt, with the line each sits on.
 
-`visit ... by llm()` renders its candidates as `Handle) <description>` lines under
-a "Candidates" heading, and the handle names are generated from the candidate set
-(two `Agent` siblings become `Agent_alpha` and `Agent_beta`, a lone one stays
-`Agent`). Scripting them by hand is therefore brittle; read them back instead.
+Candidates are rendered as `Handle) <description>` lines under a "Candidates"
+heading. Handles are generated from the candidate set: two `Agent` siblings become
+`Agent_alpha` and `Agent_beta`, a lone one stays `Agent`. Read them, do not write
+them.
 """
 def routing_candidates(params: dict) -> list[tuple[str, str]] {
     import re;
@@ -596,10 +596,8 @@ def routing_candidates(params: dict) -> list[tuple[str, str]] {
 
 """A model that reads a routing prompt and answers with the handles `pick` chooses.
 
-`pick(candidates, prompt)` gets the candidate list from routing_candidates() and
-the prompt they came from, and returns the handles to visit. Reading the prompt
-rather than scripting a reply is what keeps these tests honest: it proves the
-prompt carries enough for a chooser to decide, which is what routing is for.
+`pick(candidates, prompt)` takes the candidate list from routing_candidates() and
+the prompt they came from, and returns the handles to visit.
 
     RoutingLLM(pick=lambda (c: list, p: str) { [x[0] for x in c if "high" in x[1]]; });
 
