@@ -11,7 +11,7 @@ import yaml;
 import from fixtures { python_lib_mode }
 
 import jaclang.byllm.llm as _byllm_llm_mod;
-import from jaclang.byllm.lib { Image, Model }
+import from jaclang.byllm.lib { Image, Model, Video }
 import types;
 import from jaclang.byllm.mtir { MTRuntime }
 import from jaclang.byllm.exceptions {
@@ -41,6 +41,14 @@ import from support_tests {
 glob jac_import = Jac.jac_import,
      FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures");
 
+
+enum _WebpPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
+
+obj _WebpPerson {
+    has full_name: str,
+        year_of_death: str,
+        personality: _WebpPersonality;
+}
 
 enum _MethodPersonality { INTROVERT, EXTROVERT }
 
@@ -373,37 +381,104 @@ test "with llm type" {
     assert desired_output_count == 2;
 }
 
-test "with llm image" {
+test "an image parameter is sent as a system prompt plus a data url" {
     try {
         import PIL;
     } except ImportError {
         testskip("This test requires Pillow to be installed");
     }
-    stdout_value = run_fixture("with_llm_image");
-    assert "'role': 'system'" in stdout_value;
-    assert "{'type': 'text', 'text': 'solve_math_question" in stdout_value;
-    assert "data:image/jpeg;base64," in stdout_value[:500];
+    llm = FakeLLM(replies=[say("The answer to the math question is 42.")]);
+
+    def solve_math_question(question_img: Image) -> str by llm();
+
+    answer = solve_math_question(Image(os.path.join(FIXTURE_DIR, "math_question.jpg")));
+    assert answer == "The answer to the math question is 42.";
+
+    messages = llm.sent("messages")[0];
+    assert messages[0]["role"] == "system" , f"first message should be system: {messages[
+        0
+    ]}";
+    user_blocks = messages[1]["content"];
+    assert user_blocks[0]["type"] == "text" , f"got {user_blocks[0]}";
+    assert "solve_math_question" in user_blocks[0]["text"] , (
+        "the caller name should introduce the argument"
+    );
+    image_block = user_blocks[-1];
+    assert image_block["type"] == "image_url" , f"got {image_block}";
+    assert image_block["image_url"]["url"].startswith("data:image/jpeg;base64,") , (
+        "the image must be inlined as a jpeg data url"
+    );
 }
 
-test "webp image support" {
-    stdout_value = run_fixture("webp_support_test");
-    assert "full_name='Albert Einstein'" in stdout_value;
-    assert "year_of_death='1955'" in stdout_value;
+test "a webp image is accepted and its typed answer parsed" {
+    try {
+        import PIL;
+    } except ImportError {
+        testskip("This test requires Pillow to be installed");
+    }
+    llm = FakeLLM(
+        replies=[
+            typed(
+                {
+                    "full_name": "Albert Einstein",
+                    "year_of_death": "1955",
+                    "personality": _WebpPersonality.EXTROVERT.value
+                }
+            )
+        ]
+    );
+
+    def get_person_info(image_content: Image) -> _WebpPerson by llm();
+
+    person = get_person_info(
+        Image(os.path.join(FIXTURE_DIR, "webp_image_of_person.webp"))
+    );
+    assert person.full_name == "Albert Einstein" , f"got {person!r}";
+    assert person.year_of_death == "1955";
+    assert person.personality == _WebpPersonality.EXTROVERT;
+
+    # A typed return appends schema guidance after the image, so pick the image
+    # block by type rather than by position.
+    blocks = llm.sent("messages")[0][1]["content"];
+    images = [
+        b
+        for b in blocks
+        if b.get("type") == "image_url"
+    ];
+    assert len(images) == 1 , f"expected one image block, got {len(images)}";
+    url = images[0]["image_url"]["url"];
+    assert url.startswith("data:image/webp;base64,") , f"a webp must stay webp: {url[:60]}";
 }
 
-test "with llm video" {
+test "a video parameter is sampled into image frames" {
     try {
         import cv2;
     } except ImportError {
         testskip("This test requires OpenCV to be installed");
     }
-    stdout_value = run_fixture("with_llm_video");
-    video_explanation = (
-        "The video features a large rabbit emerging from a burrow in a lush, green environment. "
-        "The rabbit stretches and yawns, seemingly enjoying the morning. The scene is set in a "
-        "vibrant, natural setting with bright skies and trees, creating a peaceful and cheerful atmosphere."
+    explanation = (
+        "The video features a large rabbit emerging from a burrow in a lush, "
+        "green environment."
     );
-    assert video_explanation in stdout_value;
+    llm = FakeLLM(replies=[say(explanation)]);
+
+    def explain_the_video(video: Video) -> str by llm();
+
+    result = explain_the_video(
+        Video(path=os.path.join(FIXTURE_DIR, "SampleVideo_1280x720_2mb.mp4"), fps=1)
+    );
+    assert result == explanation;
+
+    blocks = llm.sent("messages")[0][1]["content"];
+    frames = [
+        b
+        for b in blocks
+        if b.get("type") == "image_url"
+    ];
+    assert len(frames) > 1 , f"a video should sample several frames, got {len(frames)}";
+    assert frames[0]["image_url"]["url"].startswith("data:image/") , (
+        "frames must be inlined as images"
+    );
 }
 
 # `sem` is a module-level construct, so these live beside their test rather than
