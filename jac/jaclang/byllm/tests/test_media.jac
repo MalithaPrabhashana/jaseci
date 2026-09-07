@@ -1,112 +1,95 @@
+"""Image and video inputs: how a media argument reaches the model.
+
+Each test asserts on the message blocks byLLM actually sent, so a change in how
+media is encoded fails here instead of passing on a substring of a log line.
+"""
+
 import os;
 import from jaclang.byllm.lib { Image, Video }
-import from support_tests { FakeLLM, say, typed }
+import from support_tests {
+    FakeLLM,
+    data_url,
+    media_blocks,
+    need,
+    roles,
+    say,
+    typed,
+    user_blocks
+}
 
 glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures");
 
 
-enum _WebpPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
+enum Personality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
 
-obj _WebpPerson {
+obj Person {
     has full_name: str,
         year_of_death: str,
-        personality: _WebpPersonality;
+        personality: Personality;
 }
 
 
-test "an image argument reaches the prompt as a data url" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
-    answer = "The image shows a hot air balloon shaped like a heart.";
-    llm = FakeLLM(replies=[say(answer)]);
-
-    def explain_the_image(image: Image) -> str by llm();
-
-    image = Image(os.path.join(FIXTURE_DIR, "image.jpg"));
-    assert explain_the_image(image) == answer;
-    prompt = str(llm.sent("messages")[0]);
-    assert "data:image/jpeg;base64," in prompt , "the image must be inlined into the prompt";
-}
-
-
-test "an image parameter is sent as a system prompt plus a data url" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
+test "an image argument is sent as a system prompt, a text block, and a data url" {
+    need("PIL", "Pillow");
     llm = FakeLLM(replies=[say("The answer to the math question is 42.")]);
 
     def solve_math_question(question_img: Image) -> str by llm();
 
     answer = solve_math_question(Image(os.path.join(FIXTURE_DIR, "math_question.jpg")));
     assert answer == "The answer to the math question is 42.";
+    assert roles(llm) == ["system", "user"] , (
+        f"expected a system turn then a user turn, got {roles(llm)}"
+    );
 
-    messages = llm.sent("messages")[0];
-    assert messages[0]["role"] == "system" , f"first message should be system: {messages[
+    blocks = user_blocks(llm);
+    assert blocks[0]["type"] == "text" , f"the argument should be introduced by text: {blocks[
         0
     ]}";
-    user_blocks = messages[1]["content"];
-    assert user_blocks[0]["type"] == "text" , f"got {user_blocks[0]}";
-    assert "solve_math_question" in user_blocks[0]["text"] , (
-        "the caller name should introduce the argument"
+    assert "solve_math_question" in blocks[0]["text"] , (
+        f"the caller name introduces the argument, got {blocks[0]['text'][:80]!r}"
     );
-    image_block = user_blocks[-1];
-    assert image_block["type"] == "image_url" , f"got {image_block}";
-    assert image_block["image_url"]["url"].startswith("data:image/jpeg;base64,") , (
-        "the image must be inlined as a jpeg data url"
+
+    images = media_blocks(llm);
+    assert len(images) == 1 , f"expected one image block, got {len(images)}";
+    assert data_url(images[0]).startswith("data:image/jpeg;base64,") , (
+        f"a jpeg must be inlined as a jpeg data url, got {data_url(images[0])[:60]!r}"
     );
 }
 
 
-test "a webp image is accepted and its typed answer parsed" {
-    try {
-        import PIL;
-    } except ImportError {
-        testskip("This test requires Pillow to be installed");
-    }
+test "a webp image keeps its own format and its typed answer is parsed" {
+    need("PIL", "Pillow");
     llm = FakeLLM(
         replies=[
             typed(
                 {
                     "full_name": "Albert Einstein",
                     "year_of_death": "1955",
-                    "personality": _WebpPersonality.EXTROVERT.value
+                    "personality": Personality.EXTROVERT.value
                 }
             )
         ]
     );
 
-    def get_person_info(image_content: Image) -> _WebpPerson by llm();
+    def get_person_info(image_content: Image) -> Person by llm();
 
     person = get_person_info(
         Image(os.path.join(FIXTURE_DIR, "webp_image_of_person.webp"))
     );
     assert person.full_name == "Albert Einstein" , f"got {person!r}";
-    assert person.year_of_death == "1955";
-    assert person.personality == _WebpPersonality.EXTROVERT;
+    assert person.year_of_death == "1955" , f"got {person!r}";
+    assert person.personality == Personality.EXTROVERT , f"got {person.personality!r}";
 
-    blocks = llm.sent("messages")[0][1]["content"];
-    images = [
-        b
-        for b in blocks
-        if b.get("type") == "image_url"
-    ];
+    images = media_blocks(llm);
     assert len(images) == 1 , f"expected one image block, got {len(images)}";
-    url = images[0]["image_url"]["url"];
-    assert url.startswith("data:image/webp;base64,") , f"a webp must stay webp: {url[:60]}";
+    assert data_url(images[0]).startswith("data:image/webp;base64,") , (
+        f"a webp must not be transcoded, got {data_url(images[0])[:60]!r}"
+    );
 }
 
 
-test "a video parameter is sampled into image frames" {
-    try {
-        import cv2;
-    } except ImportError {
-        testskip("This test requires OpenCV to be installed");
-    }
+test "a video argument is sampled into several inlined frames" {
+    need("cv2", "OpenCV");
     explanation = (
         "The video features a large rabbit emerging from a burrow in a lush, "
         "green environment."
@@ -120,14 +103,13 @@ test "a video parameter is sampled into image frames" {
     );
     assert result == explanation;
 
-    blocks = llm.sent("messages")[0][1]["content"];
-    frames = [
-        b
-        for b in blocks
-        if b.get("type") == "image_url"
-    ];
-    assert len(frames) > 1 , f"a video should sample several frames, got {len(frames)}";
-    assert frames[0]["image_url"]["url"].startswith("data:image/") , (
-        "frames must be inlined as images"
+    frames = media_blocks(llm);
+    assert len(frames) > 1 , (
+        f"a video should sample several frames, got {len(frames)}: sampling is a no-op"
     );
+    for (i, frame) in enumerate(frames) {
+        assert data_url(frame).startswith("data:image/") , (
+            f"frame {i} must be an inlined image, got {data_url(frame)[:60]!r}"
+        );
+    }
 }

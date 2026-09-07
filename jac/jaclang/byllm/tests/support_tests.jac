@@ -468,3 +468,62 @@ obj LogCapture {
 def capture_logs(level: int = logging.DEBUG, name: str = "") -> LogCapture {
     return LogCapture(level=level, name=name);
 }
+
+
+"""The conversation sent on call `n`, as the model saw it."""
+def sent_messages(llm: FakeLLM | Script, n: int = 0) -> list {
+    return llm.sent("messages")[n];
+}
+
+
+"""The role of each message sent on call `n`, in order.
+
+    assert roles(llm) == ["system", "user"];
+"""
+def roles(llm: FakeLLM | Script, n: int = 0) -> list[str] {
+    return [m["role"] for m in sent_messages(llm, n)];
+}
+
+
+"""The content blocks of the user turn of call `n`.
+
+A multimodal request assembles the user message into a list of blocks rather than
+a string, so this is where an argument, an image or a video frame lands. A
+text-only request is normalised to one text block so callers can treat both alike.
+"""
+def user_blocks(llm: FakeLLM | Script, n: int = 0) -> list {
+    content = sent_messages(llm, n)[1]["content"];
+    return content
+        if isinstance(content, list)
+        else [{"type": "text", "text": content}];
+}
+
+
+"""Just the inlined media of the user turn of call `n`, in order."""
+def media_blocks(llm: FakeLLM | Script, n: int = 0) -> list {
+    return [
+        b
+        for b in user_blocks(llm, n)
+        if b.get("type") == "image_url"
+    ];
+}
+
+
+"""The data url carried by one media block."""
+def data_url(block: dict) -> str {
+    return block["image_url"]["url"];
+}
+
+
+"""Skip the calling test when an optional dependency is absent.
+
+    need("PIL", "Pillow");
+"""
+def need(module: str, package: str = "") {
+    import importlib;
+    try {
+        importlib.import_module(module);
+    } except ImportError {
+        testskip(f"This test requires {package or module} to be installed");
+    }
+}
