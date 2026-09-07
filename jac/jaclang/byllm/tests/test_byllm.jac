@@ -44,34 +44,11 @@ def _as_any(v: any) -> any {
     return v;
 }
 
-test "llm mail summerize" {
-    stdout_value = run_fixture("llm_mail_summerize");
-    summaries = [
-        "AetherGuard reports a login to your account from a new device in Berlin and advises a password reset if the activity was unauthorized.",
-        "Claire from Novelink invites writers to a biweekly Writer's Circle this Friday for sharing work and receiving feedback in a supportive environment.",
-        "Marcus Bentley from FinTracker reports a weekly spending total of $342.65, mainly on Groceries, Transport, and Dining, with a link for detailed insights.",
-        "TechNews from DailyByte highlights how quantum computing is set to transform fields like cryptography and climate modeling, with more details in the full article.",
-        "Nora Hartwell from Wanderlust Travels offers a 30% discount on international trips booked this week, urging recipients to take advantage of the limited-time travel deal.",
-
-    ];
-    for summary in summaries {
-        assert summary in stdout_value;
-    }
-}
-
 
 test "method tool call" {
     stdout_value = run_fixture("method_tool");
     assert "Calculator.add called with 12, 34" in stdout_value;
     assert "Result: 46" in stdout_value;
-}
-
-
-test "streaming with react" {
-    stdout_value = run_fixture("streaming_with_react");
-    assert "29-10-2025" in stdout_value;
-    assert "100" in stdout_value;
-    assert "Test passed!" in stdout_value;
 }
 
 

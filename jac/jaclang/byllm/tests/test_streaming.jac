@@ -11,15 +11,16 @@ import from jaclang.byllm.telemetry { _current_invocation_id }
 import from jaclang.byllm.lib { Model }
 import from support_tests {
     FakeLLM,
-    fail,
-    mk_run,
-    scripted,
     call,
     chunk_text,
     event_types,
     events_of,
+    fail,
     finish,
+    mk_run,
+    prompt_text,
     say,
+    scripted,
     stream_events,
     typed
 }
@@ -316,4 +317,42 @@ test "the inter-chunk read timeout is set for streaming only" {
     assert "timeout" not in model.make_model_params(mk_run(stream=False)) , (
         "a non-streaming call must not inherit the inter-chunk timeout"
     );
+}
+
+
+test "a streaming react call runs its tools, then streams the answer" {
+    def get_current_date -> str {
+        return "29-10-2025";
+    }
+    def calculate(expression: str) -> str {
+        return f"Result: {eval(expression)}";
+    }
+    answer = "Today is 29-10-2025 and 25 multiplied by 4 equals 100.";
+    llm = FakeLLM(
+        replies=[
+            call("get_current_date", {}),
+            call("calculate", {"expression": "25 * 4"}),
+            finish(answer),
+            say(answer)
+        ]
+    );
+
+    """Answer the question using available tools."""
+    def answer_question(question: str) -> str by llm(
+        tools=[get_current_date, calculate], stream=True
+    );
+
+    stream = answer_question("What is today's date and what is 25 * 4?");
+    assert not isinstance(stream, str) , "a streaming call must hand back an iterator";
+
+    chunks = list(stream);
+    assert len(chunks) > 1 , f"the answer should arrive in pieces, got {len(chunks)}";
+    assert "".join(chunks) == answer , f"got {''.join(chunks)!r}";
+
+    # Both tools really ran: their results are in the conversation the final
+    # turn was built from, which a stdout grep for "100" could not distinguish
+    # from the model simply saying 100.
+    replayed = prompt_text(llm, len(llm.seen) - 1);
+    assert "29-10-2025" in replayed , "the date tool result must be replayed";
+    assert "Result: 100" in replayed , "the calculate tool result must be replayed";
 }

@@ -305,3 +305,63 @@ test "a nested obj return is parsed, including the obj it nests" {
     }
     assert len(umich.departments) == 2;
 }
+
+
+obj Email {
+    has sender: str,
+        subject: str,
+        body: str;
+}
+
+
+# `sem` is module-level, so these sit beside their test.
+glob _mail_llm = FakeLLM();
+
+def _generate_mails -> list[Email] by _mail_llm();
+
+sem _generate_mails = "Generate 5 random emails.";
+
+def _summarize(email: Email) -> str by _mail_llm();
+
+sem _summarize = "Gets an email instance and summerize the mail and return.";
+
+
+test "a list-of-obj return parses, and each element feeds the next call" {
+    inbox = [
+        {
+            "sender": "nora@wanderlust.example",
+            "subject": "30% Off Your Next Adventure",
+            "body": "An exclusive discount on international trips booked this week."
+        },
+        {
+            "sender": "support@aetherguard.example",
+            "subject": "New Login from Unknown Device",
+            "body": "We detected a login from a new device in Berlin."
+        }
+    ];
+    _mail_llm.replies.extend(
+        [typed(inbox), say("A travel discount offer."), say("A security alert.")]
+    );
+    _mail_llm.postinit();
+
+    mails = _generate_mails();
+    assert len(mails) == 2 , f"expected the whole list back, got {len(mails)}";
+    for (i, mail) in enumerate(mails) {
+        assert isinstance(mail, Email) , (
+            f"element {i} must be an Email, got {type(mail).__name__}"
+        );
+    }
+    assert mails[0].sender == "nora@wanderlust.example" , f"got {mails[0]!r}";
+    assert "Berlin" in mails[1].body , f"got {mails[1]!r}";
+
+    # Each parsed element goes back out as the argument of the next call, so its
+    # fields have to reach that prompt.
+    summaries = [_summarize(m) for m in mails];
+    assert summaries == ["A travel discount offer.", "A security alert."] , (
+        f"got {summaries}"
+    );
+    assert "30% Off Your Next Adventure" in prompt_text(_mail_llm, 1) , (
+        "the email passed in must reach the prompt"
+    );
+    assert "Berlin" in prompt_text(_mail_llm, 2);
+}
