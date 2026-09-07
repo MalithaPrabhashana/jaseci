@@ -26,6 +26,7 @@ import dataclasses;
 import from jaclang { JacRuntimeInterface as Jac }
 import from support_tests {
     FakeLLM,
+    scripted,
     typed,
     finish,
     mk_run,
@@ -40,6 +41,20 @@ import from support_tests {
 glob jac_import = Jac.jac_import,
      FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures");
 
+
+enum _MethodPersonality { INTROVERT, EXTROVERT }
+
+obj _MethodPerson {
+    has name: str,
+        age: int;
+}
+
+glob _METHOD_PERSONALITIES: set[_MethodPersonality] = {
+         _MethodPersonality.INTROVERT,
+         _MethodPersonality.EXTROVERT
+     };
+
+enum _Sentiment { POSITIVE, NEGATIVE, NEUTRAL }
 
 enum _LowerPersonality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
 
@@ -263,28 +278,64 @@ test "by expr" {
     }
 }
 
-test "with llm method" {
-    stdout_value = run_fixture("with_llm_method");
-    assert "Personality.INTROVERT" in stdout_value;
+test "a nested method's incl_info and receiver state reach the prompt" {
+    # A bare `enum { A, B }` auto-numbers its members, and the reply carries the
+    # VALUE, not the name. Scripting `.value` keeps that out of the test as a
+    # magic number.
+    llm = FakeLLM(replies=[typed(_MethodPersonality.INTROVERT.value)]);
+
+    obj _Diarist {
+        has diary_entries: list[str];
+
+        def get_personality(person: _MethodPerson) -> _MethodPersonality by llm(
+            incl_info={
+                "personality_examples": _METHOD_PERSONALITIES,
+                "diary_entries": self.diary_entries
+            }
+        );
+    }
+    diarist = _Diarist(
+        diary_entries=[
+            "I won noble prize in Physics",
+            "I am popular for my theory of relativity"
+        ]
+    );
+
+    result = diarist.get_personality(_MethodPerson(name="Albert Einstein", age=76));
+    assert result == _MethodPersonality.INTROVERT , f"got {result!r}";
+
+    prompt = str(llm.sent("messages")[0]);
+    assert "theory of relativity" in prompt , (
+        f"incl_info from the receiver must reach the prompt: {prompt[:400]}"
+    );
+    assert "Albert Einstein" in prompt , "the argument must reach the prompt";
 }
 
-test "deprecated method param" {
-    captured_output = io.StringIO();
-    sys.stdout = captured_output;
+test "the deprecated method= parameter still runs and warns once" {
+    llm = FakeLLM(replies=[say("test output")]);
+
+    def simple_tool -> str {
+        return "tool ran";
+    }
+
     with warnings.catch_warnings(record=True) as w {
         warnings.simplefilter("always");
-        jac_import("with_llm_deprecated_method", base_path=FIXTURE_DIR + "/");
+        def simple_task(query: str) -> str by llm(method="ReAct", tools=[simple_tool]);
+        result = simple_task("hello");
     }
-    sys.stdout = sys.__stdout__;
-    stdout_value = captured_output.getvalue();
-    assert "test output" in stdout_value;
-    deprecation_warnings = [
+    assert result == "test output" , f"the call must still work, got {result!r}";
+    deprecations = [
         x
         for x in w
         if issubclass(x.category, DeprecationWarning)
     ];
-    assert len(deprecation_warnings) >= 1;
-    assert "'method' parameter is deprecated" in str(deprecation_warnings[0].message);
+    assert len(deprecations) >= 1 , "expected a DeprecationWarning for method=";
+    assert "'method' parameter is deprecated" in str(deprecations[0].message) , (
+        f"got: {deprecations[0].message}"
+    );
+    assert "simple_tool" in tool_names(llm.seen[0]) , (
+        "tools= must still be sent alongside the deprecated method="
+    );
 }
 
 test "a typed object return is parsed, enum member and all" {
@@ -648,23 +699,38 @@ test "resolved api_base reaches the litellm call" {
 }
 
 
-test "api key not in verbose output" {
+test "a verbose model logs the call without leaking the api key" {
     import from loguru { logger }
+    secret = "sk-secret-test-key-do-not-leak";
+    model = Model(model_name="gpt-4o-mini", api_key=secret, config={"verbose": True});
 
-    captured_output = io.StringIO();
-    logger.remove();
-    logger.add(captured_output);
-    with contextlib.suppress(Exception) {
-        jac_import("api_key_verbose", base_path=FIXTURE_DIR + "/");
+    def greet(name: str) -> str by model();
+
+    log = io.StringIO();
+    handler_id = logger.add(log);
+    try {
+        with scripted(model, [say("Hello, Alice!")]) {
+            assert greet("Alice") == "Hello, Alice!";
+        }
+    } finally {
+        logger.remove(handler_id);
     }
-    log_value = captured_output.getvalue();
-    assert "sk-secret-test-key-do-not-leak" not in log_value;
-    assert "Calling LLM" in log_value;
+    log_value = log.getvalue();
+    assert "Calling LLM" in log_value , f"a verbose model must log the call: {log_value[:300]}";
+    assert secret not in log_value , "the api key must never reach the log";
 }
 
-test "builtin llm with mock override" {
-    stdout_value = run_fixture("builtin_llm");
-    assert "POSITIVE" in stdout_value or "positive" in stdout_value;
+test "an enum return is reconstructed as the member" {
+    llm = FakeLLM(replies=[typed(_Sentiment.POSITIVE.value)]);
+
+    def classify(text: str) -> _Sentiment by llm();
+
+    result = classify("I love this!");
+    assert result == _Sentiment.POSITIVE , f"got {result!r}";
+    assert isinstance(result, _Sentiment) , (
+        f"expected a _Sentiment member, got {type(result).__name__}"
+    );
+    assert "I love this!" in str(llm.sent("messages")[0]);
 }
 
 test "builtin llm compiles without glob" {
