@@ -566,3 +566,53 @@ def event_types(events: list) -> list[str] {
 def chunk_text(events: list) -> str {
     return "".join([e.data.get("content", "") for e in events_of(events, "chunk")]);
 }
+
+"""The candidate handles offered in a routing prompt, with the line each sits on.
+
+`visit ... by llm()` renders its candidates as `Handle) <description>` lines under
+a "Candidates" heading, and the handle names are generated from the candidate set
+(two `Agent` siblings become `Agent_alpha` and `Agent_beta`, a lone one stays
+`Agent`). Scripting them by hand is therefore brittle; read them back instead.
+"""
+def routing_candidates(params: dict) -> list[tuple[str, str]] {
+    import re;
+    out: list = [];
+    seen_heading = False;
+    for line in str(params.get("messages")).replace("\\n", "\n").split("\n") {
+        if line.lstrip().startswith("Candidates") {
+            seen_heading = True;
+            continue;
+        }
+        if seen_heading {
+            m = re.match(r"\s*([A-Za-z0-9_]+)\)\s*(.*)", line);
+            if m {
+                out.append((m.group(1), m.group(2)));
+            }
+        }
+    }
+    return out;
+}
+
+
+"""A model that reads a routing prompt and answers with the handles `pick` chooses.
+
+`pick` takes the candidate list from routing_candidates() and returns the handles
+to visit. Reading the prompt rather than scripting a reply is what keeps these
+tests honest: it proves the prompt carries enough for a chooser to decide, which
+is the thing routing exists to do.
+
+    llm = RoutingLLM(pick=lambda (c: list) { [h for (h, line) in c if "high" in line]; });
+"""
+obj RoutingLLM(FakeLLM) {
+    has pick: Callable = lambda (c: list) { [c[0][0]] if c else []; };
+
+    override def model_call_no_stream(params: dict) -> object {
+        import json;
+        self.seen.append(params);
+        chosen = self.pick(routing_candidates(params));
+        return response(
+            say(json.dumps({"schema_object_wrapper": chosen})),
+            params.get("model") or self.model_name
+        );
+    }
+}
