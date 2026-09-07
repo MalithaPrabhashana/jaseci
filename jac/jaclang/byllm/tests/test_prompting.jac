@@ -4,7 +4,12 @@ sem strings, incl_info, temperature and receiver state on the way out; typed
 returns, enums and scalars on the way back. Assert on both directions.
 """
 
+import os;
+import from jaclang { JacRuntimeInterface as Jac }
 import from support_tests { FakeLLM, call, prompt_text, roles, say, tool_names, typed }
+
+
+glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures");
 
 
 enum _Sentiment { POSITIVE, NEGATIVE, NEUTRAL }
@@ -404,5 +409,38 @@ test "the model can be any expression, and a bound call keeps its tools" {
     assert ran == [code] , f"the tool bound in the expression must run, got {ran}";
     assert "run_and_test_python_code" in tool_names(code_llm.seen[0]) , (
         f"got {tool_names(code_llm.seen[0])}"
+    );
+}
+
+
+test "a jac.toml system prompt reaches the model, and a per-call one extends it" {
+    # The fixture sits beside its own jac.toml because byLLM resolves config
+    # from the module's location, so this cannot be done by patching a dict.
+    mod = Jac.jac_import(
+        "direct_http_model_call",
+        base_path=os.path.join(FIXTURE_DIR, "system_prompt_override/")
+    )[0];
+    llm = FakeLLM(
+        replies=[
+            say("Hello, Alice! It is great to meet you."),
+            say("Hi Alice, welcome!")
+        ]
+    );
+    mod.llm = llm;
+
+    assert mod.say_hello("Alice") == "Hello, Alice! It is great to meet you.";
+    base = str(llm.sent("messages")[0][0]);
+    assert "You are a friendly assistant" in base , (
+        f"the jac.toml system_prompt must reach the model, got {base[:160]!r}"
+    );
+    assert "three words" not in base , "the per-call prompt must not leak into the first call";
+
+    assert mod.say_hello_brief("Alice") == "Hi Alice, welcome!";
+    extended = str(llm.sent("messages")[1][0]);
+    assert "You are a friendly assistant" in extended , (
+        "a per-call system_prompt extends the base, it does not replace it"
+    );
+    assert "Respond in three words maximum." in extended , (
+        f"the per-call system_prompt is missing, got {extended[:200]!r}"
     );
 }

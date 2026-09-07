@@ -118,29 +118,6 @@ test "streaming visit by routes and streams tokens to handler" {
 }
 
 
-test "http client with system prompt override" {
-    captured_output = io.StringIO();
-    sys.stdout = captured_output;
-    jac_import(
-        "direct_http_model_call",
-        base_path=os.path.join(FIXTURE_DIR, "system_prompt_override/")
-    );
-    sys.stdout = sys.__stdout__;
-    stdout_value = captured_output.getvalue();
-
-    assert "Hello, Alice! It's great to meet you." in stdout_value;
-    assert "Hi Alice, welcome!" in stdout_value;
-
-    assert "You are a friendly assistant. Greet the person" in stdout_value;
-
-    assert "Respond in three words maximum." in stdout_value;
-
-    assert (
-        "'api_base': 'https://your_api_base_here/v1/chat/completions'" in stdout_value
-    );
-}
-
-
 test "api key resolves from constructor, then instance config, then global config" {
     for (why, global_key, kwargs, expected) in [
         ("constructor", None, {"api_key": "sk-constructor-key"}, "sk-constructor-key"),
