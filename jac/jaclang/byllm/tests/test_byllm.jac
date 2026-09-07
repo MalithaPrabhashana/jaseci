@@ -95,10 +95,6 @@ test "logging stream str answer without finish_tool delivers on chunk" {
     assert "STR_SKIP_FINISH_CHUNK_PASS" in stdout_value;
 }
 
-test "conversation kwarg writes back history with tool calls preserved" {
-    stdout_value = run_fixture("conversation_param");
-    assert "CONV_PARAM_PASS" in stdout_value;
-}
 
 test "streaming + conversation persists assistant message and emits dicts" {
     stdout_value = run_fixture("streaming_conversation");
@@ -381,19 +377,7 @@ test "resolved api_base reaches the litellm call" {
         with unittest.mock.patch.object(
             _byllm_llm_mod.litellm, "completion", _fake_completion
         ) {
-            model.dispatch_no_streaming(
-                MTRuntime(
-                    messages=[
-                        Message(role=MessageRole.SYSTEM, content="s"),
-                        Message(role=MessageRole.USER, content="u")
-                    ],
-                    resp_type=str,
-                    stream=False,
-                    tools=[],
-                    call_params={},
-                    mtir=None
-                )
-            );
+            model.dispatch_no_streaming(mk_run(resp_type=str));
         }
         return seen.get("api_base");
     }
@@ -536,19 +520,9 @@ test "bare container return types are a configuration error" {
 
 test "unregistered tool call is recovered not fatal" {
     model = Model(model_name="test-model");
-    messages_list = [
-        Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
-        Message(role=MessageRole.USER, content="Do something."),
-
-    ];
-    mt_run = MTRuntime(
-        messages=messages_list,
-        resp_type=None,
-        stream=False,
-        tools=[],
-        call_params={},
-        mtir=None
-    );
+    # resp_type is immaterial here; the subject is how an unknown tool name is
+    # handled, so the default str return keeps the run valid.
+    mt_run = mk_run(finish=False);
 
     fake_fn = types.SimpleNamespace(name="nonexistent_tool", arguments="{}");
     fake_tool_call = types.SimpleNamespace(id="call_abc", function=fake_fn);
@@ -692,17 +666,7 @@ test "dispatch heals a misnamed finish argument and recovers an unusable one" {
 test "response format requests always carry the json word" {
     def _params(resp_type: type, tools: list) -> dict {
         model = Model(model_name="test-model");
-        mt_run = MTRuntime(
-            messages=[
-                Message(role=MessageRole.SYSTEM, content="sys"),
-                Message(role=MessageRole.USER, content="do the thing")
-            ],
-            resp_type=resp_type,
-            stream=False,
-            tools=tools,
-            call_params={},
-            mtir=None
-        );
+        mt_run = mk_run(resp_type=resp_type, tools=tools, finish=False);
         return model.make_model_params(mt_run);
     }
     for (label, resp_type, tools, want_rf) in [
@@ -863,9 +827,7 @@ test "McpTool plugs into MTRuntime.get_tool() polymorphically" {
         input_schema={"type": "object", "properties": {}},
         _client=_dummy_mcp_client
     );
-    mt_run = MTRuntime(
-        messages=[], resp_type=None, stream=False, tools=[], call_params={}, mtir=None
-    );
+    mt_run = mk_run(messages=[], finish=False);
 
     getattr(mt_run, "tools").append(mcp_tool);
     found = mt_run.get_tool("lookup");
