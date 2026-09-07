@@ -135,3 +135,100 @@ test "router init aliases deployments by strategy" {
         ]}"
     );
 }
+
+
+"""One streaming chunk, in the shape litellm's Router hands back."""
+def _stream_chunk(text: str) -> object {
+    import types;
+    return types.SimpleNamespace(
+        choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content=text))]
+    );
+}
+
+
+test "a pool that fails before streaming falls back to the next deployment" {
+    import from litellm.exceptions { RateLimitError }
+    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
+    tried: list = [];
+
+    def _completion(
+        model: str, messages: list, stream: bool, fallbacks: list, **_kw: object
+    ) -> object {
+        tried.append(model);
+        if model == "pool-primary" {
+            raise RateLimitError(
+                message="Primary quota exceeded",
+                model="gpt-3.5-turbo",
+                llm_provider="openai"
+            );
+        }
+        def _gen -> object {
+            yield _stream_chunk("stream_fallback_");
+            yield _stream_chunk("success");
+        }
+        return _gen();
+    }
+
+    # `_completion` is the per-model call the fallback loop drives with
+    # fallbacks=[], so the Router cannot recurse back into the primary.
+    router(pool)._completion = _completion;
+
+    def stream_answer(question: str) -> str by pool(stream=True);
+
+    assert "".join(list(stream_answer("test question"))) == "stream_fallback_success";
+    assert tried == ["pool-primary", "pool-fallback-1"] , (
+        f"the primary must be tried first, then the fallback, got {tried}"
+    );
+}
+
+
+test "a pool that fails mid-stream raises rather than splicing in a fallback" {
+    # Once a chunk has been delivered the caller has already seen partial
+    # output, so falling back would concatenate partial-A with a whole B. The
+    # yielded guard turns that into a raise instead.
+    import from litellm.exceptions { RateLimitError }
+    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
+    tried: list = [];
+
+    def _completion(
+        model: str, messages: list, stream: bool, fallbacks: list, **_kw: object
+    ) -> object {
+        tried.append(model);
+        if model == "pool-primary" {
+            def _failing -> object {
+                yield _stream_chunk("partial_chunk");
+                raise RateLimitError(
+                    message="Primary failed mid-stream",
+                    model="gpt-3.5-turbo",
+                    llm_provider="openai"
+                );
+            }
+            return _failing();
+        }
+        def _never -> object {
+            yield _stream_chunk("should_not_appear");
+        }
+        return _never();
+    }
+    router(pool)._completion = _completion;
+
+    def stream_answer(question: str) -> str by pool(stream=True);
+
+    chunks: list = [];
+    raised: any = None;
+    try {
+        for chunk in stream_answer("test question") {
+            chunks.append(chunk);
+        }
+    } except RateLimitError as e {
+        raised = e;
+    }
+    assert raised is not None , "a mid-stream failure must reach the caller";
+    assert "partial_chunk" in "".join(chunks) , (
+        f"what was already streamed is still delivered, got {chunks}"
+    );
+    assert "should_not_appear" not in "".join(chunks) , (
+        f"the fallback must not be spliced onto partial output, got {chunks}"
+    );
+    assert tried == ["pool-primary"] , f"the fallback must not be tried at all, got {tried}";
+}

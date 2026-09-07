@@ -692,18 +692,6 @@ test "McpClient raises McpError when mcp package is missing" {
     }
 }
 
-test "model pool streaming fallback" {
-    stdout_value = run_fixture("model_pool_streaming_fallback");
-    assert "output:stream_fallback_success" in stdout_value;
-    assert "primary_tried:True" in stdout_value;
-    assert "fallback_tried:True" in stdout_value;
-    assert "order_correct:True" in stdout_value;
-
-    assert "mid_raised:True" in stdout_value;
-    assert "mid_partial_received:True" in stdout_value;
-    assert "mid_fallback_not_tried:True" in stdout_value;
-    assert "mid_should_not_appear:True" in stdout_value;
-}
 
 import from jaclang.byllm.llm {
     _is_prompt_caching_eligible,
