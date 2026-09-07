@@ -52,24 +52,6 @@ test "method tool call" {
 }
 
 
-test "by expr" {
-    stdout_value = run_fixture("by_expr");
-    expected_lines = (
-        "Generated greeting: Hello, Alice! It's great to see you!",
-        "[run_and_test_python_code] Executing code:",
-        "[run_and_test_python_code] \"name = 'Alice'\\nprint(f'Hello, {name}! Welcome to the Python world!')\"",
-        "Hello, Alice! Welcome to the Python world!",
-        "[run_and_test_python_code] Code executed successfully.",
-        "Generated greeting code: name = 'Alice'",
-        "print(f'Hello, {name}! Welcome to the Python world!')",
-
-    );
-    for line in expected_lines {
-        assert line in stdout_value;
-    }
-}
-
-
 test "the deprecated method= parameter still runs and warns once" {
     llm = FakeLLM(replies=[say("test output")]);
 
@@ -120,26 +102,6 @@ test "enum without value" {
     assert "NO" in stdout_value;
 }
 
-test "fixtures image types" {
-    stdout_value = run_fixture("image_types");
-    expected_labels = [
-        "PIL Image",
-        "Image from file path",
-        "Image from URL",
-        "Image from BytesIO",
-        "Image from raw bytes",
-        "Image from memoryview",
-        "Image from data URL",
-        "Image from PathLike",
-        "Image from file-like without getvalue",
-        "Image from bytearray",
-        "Image from gs:// URL",
-
-    ];
-    for label in expected_labels {
-        assert label in stdout_value;
-    }
-}
 
 test "visit by for routing" {
     stdout_value = run_fixture("math_poem_agents");

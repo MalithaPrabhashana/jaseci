@@ -365,3 +365,44 @@ test "a list-of-obj return parses, and each element feeds the next call" {
     );
     assert "Berlin" in prompt_text(_mail_llm, 2);
 }
+
+
+test "the model can be any expression, and a bound call keeps its tools" {
+    # `by <expr>` takes a model from anywhere, not just a bare name, and a model
+    # already bound with tools= keeps that binding.
+    ran: list = [];
+
+    """Run Python code and return the output, or the error message."""
+    def run_and_test_python_code(code: str) -> str {
+        ran.append(code);
+        return "Code executed successfully.";
+    }
+    code = "name = 'Alice'; print(name)";
+    # Held by name as FakeLLM: calling one with tools= returns a BaseLLM, which
+    # carries no seen/sent, so the recorder needs its own binding.
+    text_llm = FakeLLM(replies=[say("Hello, Alice! It is great to see you!")]);
+    code_llm = FakeLLM(
+        replies=[call("run_and_test_python_code", {"code": code}), say(code)]
+    );
+    models = {
+        "text-gen": text_llm,
+        "code-gen": code_llm(tools=[run_and_test_python_code])
+    };
+
+    """Generate a greeting for the given person's name."""
+    def greeting_text(name: str) -> str by models["text-gen"];
+
+    """Generate python greeting code, running it to check it works."""
+    def greeting_code(name: str) -> str by models["code-gen"];
+
+    assert greeting_text("Alice") == "Hello, Alice! It is great to see you!";
+    assert tool_names(text_llm.seen[0]) == [] , (
+        f"an unbound model sends no tools, got {tool_names(text_llm.seen[0])}"
+    );
+
+    assert greeting_code("Alice") == code , "the bound model's answer";
+    assert ran == [code] , f"the tool bound in the expression must run, got {ran}";
+    assert "run_and_test_python_code" in tool_names(code_llm.seen[0]) , (
+        f"got {tool_names(code_llm.seen[0])}"
+    );
+}

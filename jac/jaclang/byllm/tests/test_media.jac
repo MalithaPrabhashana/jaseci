@@ -146,3 +146,42 @@ test "an image parameter carrying a sem still encodes, and the sem is dropped" {
         "the sem is present instead"
     );
 }
+
+
+test "every accepted image source becomes a usable url" {
+    need("PIL", "Pillow");
+    import base64;
+    import io;
+    import from pathlib { Path }
+    import from PIL { Image as PILImage }
+    jpg = os.path.join(FIXTURE_DIR, "alan-m-turing.jpg");
+    pil = PILImage.open(jpg);
+
+    def png_bytes -> bytes {
+        buf = io.BytesIO();
+        pil.save(buf, format="PNG");
+        return buf.getvalue();
+    }
+    raw = png_bytes();
+    data_url = "data:image/png;base64," + base64.b64encode(raw).decode("utf-8");
+
+    # (label, what the caller hands to Image(), what the url must start with).
+    # A remote or data url passes through untouched; everything else is read and
+    # inlined.
+    for (label, source, prefix) in [
+        ("PIL Image", pil, "data:image/"),
+        ("file path", jpg, "data:image/jpeg"),
+        ("PathLike", Path(jpg), "data:image/jpeg"),
+        ("raw bytes", raw, "data:image/"),
+        ("bytearray", bytearray(raw), "data:image/"),
+        ("memoryview", memoryview(raw), "data:image/"),
+        ("BytesIO", io.BytesIO(raw), "data:image/"),
+        ("stream without getvalue", io.BufferedReader(io.BytesIO(raw)), "data:image/"),
+        ("data url", data_url, "data:image/png"),
+        ("http url", "https://example.com/turing.jpg", "https://"),
+        ("gs url", "gs://bucket/path/turing.png", "gs://")
+    ] {
+        url = str(Image(source).url);
+        assert url.startswith(prefix) , f"{label}: expected {prefix}, got {url[:48]!r}";
+    }
+}
