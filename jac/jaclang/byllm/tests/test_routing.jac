@@ -92,22 +92,42 @@ test "candidates with identical field values stay distinct targets" {
 
 
 test "routing-only call params are stripped before the request goes out" {
-    # select, intent and incl_info are consumed by the router. A real backend
-    # rejects them as unknown kwargs. temperature is a real knob and must survive.
+    # select, intent and incl_info are consumed by the router; a real backend
+    # rejects them as unknown kwargs. temperature is a real knob and must
+    # survive.
+    #
+    # Asserted on the MTRuntime the routing call built, not on the outgoing
+    # params: make_model_params assembles the request from a fixed set of keys,
+    # so an unstripped routing key could never appear there and asserting its
+    # absence would pass no matter what.
     llm = RoutingLLM();
     rg.llm = llm;
     hub = build_hub([("alpha", "low")]);
 
-    leaky() spawn hub;
+    seen_params: list = [];
+    original = JacRuntime.call_llm;
 
-    sent = llm.seen[0];
-    for leaked in ["select", "intent", "incl_info"] {
-        assert leaked not in sent , f"{leaked} must not reach the model: {sorted(
-            sent
-        )}";
+    def capture(model: any, mt_run: any) -> any {
+        seen_params.append(dict(mt_run.call_params or {}));
+        return original(model, mt_run);
     }
-    assert sent.get("temperature") == 0.5 , (
-        f"a real API knob must still pass through, got {sent.get('temperature')!r}"
+    JacRuntime.call_llm = capture;
+    try {
+        leaky() spawn hub;
+    } finally {
+        JacRuntime.call_llm = original;
+    }
+    assert seen_params , "the routing call never reached call_llm";
+    routed = seen_params[0];
+    for leaked in ["select", "intent", "incl_info"] {
+        assert leaked not in routed , (
+            f"{leaked} is routing control and must not survive into the call: {sorted(
+                routed
+            )}"
+        );
+    }
+    assert routed.get("temperature") == 0.5 , (
+        f"a real API knob must still pass through, got {routed.get('temperature')!r}"
     );
 }
 
