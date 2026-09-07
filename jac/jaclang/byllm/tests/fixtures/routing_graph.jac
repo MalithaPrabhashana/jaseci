@@ -29,6 +29,10 @@ node Agent {
     can log_collected with collector entry {
         visitor.visited.append(self.tag);
     }
+
+    can log_streamed with stream_router entry {
+        visitor.visited.append(self.tag);
+    }
 }
 
 walker router {
@@ -63,5 +67,24 @@ walker leaky {
         visit [-->] by llm(
             select=1, intent="go", incl_info={"k": "v"}, temperature=0.5
         );
+    }
+}
+
+
+"""Tokens the routing decision streamed, as a live token feed would consume them."""
+glob streamed: list = [];
+
+def route_sink(ev: any) {
+    if ev.event_type == "chunk" {
+        streamed.append(str(ev.data.get("content", "")));
+    }
+}
+
+
+walker stream_router {
+    has visited: list = [];
+
+    can route with Hub entry {
+        visit [-->] by llm(stream=True, stream_handler=route_sink);
     }
 }

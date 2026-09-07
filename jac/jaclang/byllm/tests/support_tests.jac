@@ -596,23 +596,55 @@ def routing_candidates(params: dict) -> list[tuple[str, str]] {
 
 """A model that reads a routing prompt and answers with the handles `pick` chooses.
 
-`pick` takes the candidate list from routing_candidates() and returns the handles
-to visit. Reading the prompt rather than scripting a reply is what keeps these
-tests honest: it proves the prompt carries enough for a chooser to decide, which
-is the thing routing exists to do.
+`pick(candidates, prompt)` gets the candidate list from routing_candidates() and
+the prompt they came from, and returns the handles to visit. Reading the prompt
+rather than scripting a reply is what keeps these tests honest: it proves the
+prompt carries enough for a chooser to decide, which is what routing is for.
 
-    llm = RoutingLLM(pick=lambda (c: list) { [h for (h, line) in c if "high" in line]; });
+    RoutingLLM(pick=lambda (c: list, p: str) { [x[0] for x in c if "high" in x[1]]; });
+
+A graph whose nodes also make their own `by llm()` calls sends both kinds through
+one model, so a prompt with no candidates falls through to the scripted replies.
 """
 obj RoutingLLM(FakeLLM) {
-    has pick: Callable = lambda (c: list) { [c[0][0]] if c else []; };
+    has pick: Callable = lambda (c: list, p: str) { [c[0][0]] if c else []; };
 
     override def model_call_no_stream(params: dict) -> object {
-        import json;
+        candidates = routing_candidates(params);
+        if not candidates {
+            # Not a routing prompt. A graph whose nodes also make their own
+            # `by llm()` calls sends both kinds through the same model, so fall
+            # through to the scripted replies for those.
+            return super.model_call_no_stream(params);
+        }
         self.seen.append(params);
-        chosen = self.pick(routing_candidates(params));
         return response(
-            say(json.dumps({"schema_object_wrapper": chosen})),
-            params.get("model") or self.model_name
+            self._answer(params, candidates), params.get("model") or self.model_name
         );
+    }
+
+    override def model_call_with_stream(params: dict) -> Generator[object, None, None] {
+        candidates = routing_candidates(params);
+        if not candidates {
+            for chunk in super.model_call_with_stream(params) {
+                yield chunk;
+            }
+            return;
+        }
+        self.seen.append(params);
+        for chunk in chunks(
+            self._answer(params, candidates),
+            params.get("model") or self.model_name,
+            self.chunk_size
+        ) {
+            yield chunk;
+        }
+    }
+
+    """The reply this routing call should answer with."""
+    def _answer(params: dict, candidates: list) -> Reply {
+        import json;
+        chosen = self.pick(candidates, str(params.get("messages")));
+        return say(json.dumps({"schema_object_wrapper": chosen}));
     }
 }

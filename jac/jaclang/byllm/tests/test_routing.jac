@@ -15,10 +15,13 @@ import from fixtures.routing_graph {
     collector,
     leaky,
     picker,
-    router
+    router,
+    stream_router
 }
 import fixtures.routing_graph as rg;
-import from support_tests { RoutingLLM, routing_candidates }
+import from fixtures.agent_graph { MathAgent, PoemAgent, Team, supervisor }
+import fixtures.agent_graph as ag;
+import from support_tests { RoutingLLM, prompt_text, routing_candidates, say }
 
 
 """A hub with one agent per (tag, edge priority) pair."""
@@ -33,7 +36,7 @@ def build_hub(pairs: list) -> Hub {
 
 test "the prompt renders each candidate's edge, so routing can choose by it" {
     llm = RoutingLLM(
-        pick=lambda (c: list) { [
+        pick=lambda (c: list, p: str) { [
             x[0]
             for x in c
             if "priority='high'" in x[1]
@@ -76,7 +79,7 @@ test "an arbitrary node list is offered without a fabricated edge" {
 test "candidates with identical field values stay distinct targets" {
     # Two parameterless Agents are equal by value. Value-based dedup would
     # collapse them and visit once; identity-based dedup keeps both.
-    llm = RoutingLLM(pick=lambda (c: list) { [x[0] for x in c]; });
+    llm = RoutingLLM(pick=lambda (c: list, p: str) { [x[0] for x in c]; });
     rg.llm = llm;
     hub = build_hub([("same", "low"), ("same", "low")]);
 
@@ -133,4 +136,72 @@ test "a routing call dispatches through the central call_llm entry" {
         calls
     )}";
     assert w.visited == ["a"] , f"got {w.visited}";
+}
+
+
+test "a supervisor routes to the agent whose speciality matches the request" {
+    # One run makes two model calls of different kinds through the same model:
+    # the routing choice, then the chosen agent's own `by llm()`. RoutingLLM
+    # answers the first from the prompt and falls through to the script for the
+    # second.
+    poem = "In circuits bright, with purpose clear, agentic minds we hold dear.";
+
+    """Route on what the user asked for.
+
+    Reads the request out of the prompt rather than matching the whole thing:
+    the handles are derived from node type names, so a bare `"poem" in prompt`
+    is true for the math request too, because PoemAgent is on the candidate list.
+    """
+    def by_topic(candidates: list, prompt: str) -> list {
+        import re;
+        m = re.search(r"user_input='([^']*)'", prompt);
+        asked = m.group(1).lower() if m else "";
+        wants_poem = "poem" in asked;
+        return [
+            x[0]
+            for x in candidates
+            if ("Poem" in x[0]) == wants_poem
+        ][:1];
+    }
+    llm = RoutingLLM(replies=[say(poem), say("35")], pick=by_topic);
+    ag.llm = llm;
+    team = root ++> Team();
+    team ++> PoemAgent();
+    team ++> MathAgent();
+
+    w1 = supervisor(
+        user_input="Write four lines of a poem about Agentic AI"
+    ) spawn team;
+    assert w1.answers == [("poem", poem)] , f"got {w1.answers}";
+
+    w2 = supervisor(user_input="What is (15 + 5) * 2 - (10 / 2)?") spawn team;
+    assert w2.answers == [("math", "35")] , f"got {w2.answers}";
+
+    # The user input reaches the routing prompt, which is how the choice is made.
+    assert "Agentic AI" in prompt_text(llm, 0) , "incl_info must carry the user input";
+}
+
+
+test "a streaming routing decision reaches the handler and still selects an edge" {
+    # The decision streams token by token to a stream_handler, which is how a
+    # live token feed consumes it, while the structured choice still drives the
+    # walker to the chosen successor.
+    llm = RoutingLLM(
+        pick=lambda (c: list, p: str) { [
+            x[0]
+            for x in c
+            if "green" in x[1]
+        ]; }
+    );
+    rg.llm = llm;
+    rg.streamed.clear();
+    hub = build_hub([("red", "low"), ("green", "low")]);
+
+    w = stream_router() spawn hub;
+
+    assert w.visited == ["green"] , f"the structured choice must still route, got {w.visited}";
+    assert rg.streamed , "the stream_handler received no chunk events";
+    assert "green" in "".join(rg.streamed) , (
+        f"the decision must reach the handler token by token, got {rg.streamed}"
+    );
 }
