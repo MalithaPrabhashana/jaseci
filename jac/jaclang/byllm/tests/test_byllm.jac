@@ -67,12 +67,6 @@ test "method tool call" {
 }
 
 
-test "image param with sem string doesn't crash Message.to_dict" {
-    stdout_value = run_fixture("image_with_sem");
-    assert "IMAGE_SEM_PASS" in stdout_value;
-}
-
-
 test "streaming with react" {
     stdout_value = run_fixture("streaming_with_react");
     assert "29-10-2025" in stdout_value;
@@ -91,10 +85,6 @@ test "transient mid-stream drop retried on same model, output de-duplicated" {
     assert "STREAM_RETRY_PASS" in stdout_value;
 }
 
-test "streaming generator survives consumption from a foreign Context" {
-    stdout_value = run_fixture("streaming_cross_context");
-    assert "CROSS_CONTEXT_PASS" in stdout_value;
-}
 
 test "by expr" {
     stdout_value = run_fixture("by_expr");
@@ -214,10 +204,6 @@ test "streaming visit by routes and streams tokens to handler" {
     assert "VISITED: red" not in stdout_value;
 }
 
-test "structured streaming without a handler is rejected" {
-    stdout_value = run_fixture("streaming_structured_no_handler");
-    assert "STREAMING_GUARD_PASS" in stdout_value;
-}
 
 test "http client with system prompt override" {
     captured_output = io.StringIO();

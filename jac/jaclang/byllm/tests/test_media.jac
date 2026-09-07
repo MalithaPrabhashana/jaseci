@@ -7,6 +7,7 @@ import os;
 import from jaclang.byllm.lib { Image, Video }
 import from support_tests {
     FakeLLM,
+    prompt_text,
     data_url,
     media_blocks,
     need,
@@ -110,4 +111,38 @@ test "a video argument is sampled into several inlined frames" {
             f"frame {i} must be an inlined image, got {data_url(frame)[:60]!r}"
         );
     }
+}
+
+
+# `sem` is module-level, so this pair sits beside its test.
+glob _sem_llm = FakeLLM(replies=[say("A hot air balloon.")]);
+
+def _describe_image(img: Image) -> str by _sem_llm();
+
+sem _describe_image.img = "User-attached image to describe.";
+
+
+test "an image parameter carrying a sem still encodes, and the sem is dropped" {
+    # Subject: a `sem <fn>.<param>` beside an Image parameter must not break
+    # Message.to_dict, which it used to.
+    #
+    # It also pins a gap. The parameter sem never reaches the model: the user
+    # turn is the caller name and the image, and the sem text appears in no
+    # message. A function-level sem does reach the prompt (test_prompting.jac
+    # asserts that), so this is specific to parameter sems. Reported on #9002.
+    # Flip the last assertion when that is fixed.
+    need("PIL", "Pillow");
+    result = _describe_image(Image(os.path.join(FIXTURE_DIR, "image.jpg")));
+    assert "hot air balloon" in result.lower() , f"got {result!r}";
+
+    images = media_blocks(_sem_llm);
+    assert len(images) == 1 , f"the image must still be inlined, got {len(
+        images
+    )} blocks";
+    assert data_url(images[0]).startswith("data:image/jpeg;base64,");
+
+    assert "User-attached image to describe." not in prompt_text(_sem_llm) , (
+        "parameter sems now reach the prompt: delete this assertion and assert "
+        "the sem is present instead"
+    );
 }

@@ -4,6 +4,10 @@ Without `logging=True` the call yields text. With it, the call yields StreamEven
 and the answer arrives on the `chunk` channel; tool activity arrives before it.
 """
 
+import asyncio;
+import contextvars;
+import from jaclang.byllm.exceptions { ConfigurationError }
+import from jaclang.byllm.telemetry { _current_invocation_id }
 import from support_tests {
     FakeLLM,
     call,
@@ -12,7 +16,8 @@ import from support_tests {
     events_of,
     finish,
     say,
-    stream_events
+    stream_events,
+    typed
 }
 
 
@@ -136,4 +141,83 @@ test "a str answer that skips finish_tool still arrives on the chunk channel" {
     assert "sunny in London" in chunk_text(events) , (
         f"the answer must be on the chunk channel, got {chunk_text(events)!r}"
     );
+}
+
+
+test "a structured return cannot stream without a handler to consume it" {
+    # Streaming a non-str return has no well-defined result unless something
+    # consumes the events, so it is rejected up front rather than half-working.
+    llm = FakeLLM(replies=[typed([1])]);
+
+    def pick(options: str) -> list[int] by llm(stream=True);
+
+    raised: any = None;
+    try {
+        pick("0=a, 1=b");
+    } except ConfigurationError as e {
+        raised = e;
+    }
+    assert raised is not None , (
+        "structured streaming without a stream_handler must raise ConfigurationError"
+    );
+}
+
+
+"""End-of-stream sentinel, so a worker can report it by identity."""
+glob _STOP = object();
+
+def _next_or_stop(gen: any) -> object {
+    try {
+        return next(gen);
+    } except StopIteration {
+        return _STOP;
+    }
+}
+
+
+"""Drain a generator inside a fresh contextvars Context."""
+def _drain_in_copied_context(gen: any) -> list {
+    return contextvars.copy_context().run(list, gen);
+}
+
+
+"""Drive each next() on a thread-pool worker, as the scale backend's SSE path does."""
+def _drain_in_thread_pool(gen: any) -> list {
+    async def _run -> list {
+        loop = asyncio.get_event_loop();
+        out: list = [];
+        while True {
+            item = await loop.run_in_executor(None, _next_or_stop, gen);
+            if item is _STOP {
+                break;
+            }
+            out.append(item);
+        }
+        return out;
+    }
+    return asyncio.run(_run());
+}
+
+
+test "a stream survives being consumed from a foreign context" {
+    # Regression for the scale backend's sse_frame_stream, which drives next()
+    # on a thread-pool worker. The wrapper used to reset its invocation-id Token
+    # in a finally that ran in that foreign Context, raising "Token was created
+    # in a different Context" and killing the stream.
+    for (label, drain) in [
+        ("copied context", _drain_in_copied_context),
+        ("thread pool", _drain_in_thread_pool)
+    ] {
+        answer = f"alpha beta gamma from a {label}";
+        llm = FakeLLM(replies=[say(answer)]);
+
+        def stream_answer -> str by llm(stream=True);
+
+        chunks = drain(stream_answer());
+        assert chunks , f"{label}: iteration produced no chunks";
+        assert "".join(chunks) == answer , f"{label}: got {''.join(chunks)!r}";
+        assert _current_invocation_id.get(None) is None , (
+            f"{label}: the invocation id leaked into the caller's Context"
+        );
+    }
 }
