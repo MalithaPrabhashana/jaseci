@@ -45,27 +45,41 @@ def _pool(strategy: str, names: list[str]) -> ModelPool {
 }
 
 
-test "a fallback pool dispatches through its router" {
-    pool = _pool("fallback", ["gpt-3.5-turbo", "gpt-4"]);
-    router(pool).completion = _pool_reply("fallback_success");
+test "every routing strategy dispatches through the router and answers" {
+    # (strategy, deployments, expected alias, patch the async path?)
+    # Only "fallback" gives each deployment a unique alias; every
+    # load-balancing strategy, cost-based-routing included, shares pool-model.
+    # cost-based-routing only has an acompletion path; ModelPool bridges it onto
+    # the sync call, so patching acompletion is what proves the bridge is used.
+    for (strategy, names, alias, is_async) in [
+        ("fallback", ["gpt-3.5-turbo", "gpt-4"], "pool-primary", False),
+        (
+            "simple-shuffle",
+            ["gpt-3.5-turbo", "gpt-4o-mini", "gemini/gemini-2.0-flash"],
+            "pool-model",
+            False
+        ),
+        ("cost-based-routing", ["gpt-4o", "gpt-4o-mini"], "pool-model", True)
+    ] {
+        pool = _pool(strategy, names);
+        assert pool.model_name == alias , f"{strategy}: got alias {pool.model_name!r}";
 
-    def get_answer(question: str) -> str by pool();
+        answer = f"{strategy}_answer";
+        if is_async {
+            async def _acompletion(**_kwargs: object) -> dict {
+                return _pool_reply(answer)();
+            }
+            router(pool).acompletion = _acompletion;
+        } else {
+            router(pool).completion = _pool_reply(answer);
+        }
 
-    assert get_answer("test question") == "fallback_success";
-}
+        def get_answer(question: str) -> str by pool();
 
-
-test "a load-balancing pool shares one alias across every deployment" {
-    pool = _pool(
-        "simple-shuffle", ["gpt-3.5-turbo", "gpt-4o-mini", "gemini/gemini-2.0-flash"]
-    );
-    assert pool.model_name == "pool-model" , f"got {pool.model_name!r}";
-    router(pool).completion = _pool_reply("load_balance_response");
-
-    def get_answer(question: str) -> str by pool();
-
-    answers = [get_answer(f"question {i}") for i in range(3)];
-    assert answers == ["load_balance_response"] * 3 , f"got {answers}";
+        # Three calls, so a load-balancing pool is exercised across deployments.
+        got = [get_answer(f"question {i}") for i in range(3)];
+        assert got == [answer] * 3 , f"{strategy}: got {got}";
+    }
 }
 
 
@@ -94,19 +108,6 @@ test "a pool with every deployment exhausted raises rather than swallowing" {
     assert type(raised).__name__ == "RateLimitError" , (
         f"expected the rate-limit error to propagate, got {type(raised).__name__}"
     );
-}
-
-
-test "cost-based routing dispatches through the async router path" {
-    pool = _pool("cost-based-routing", ["gpt-4o", "gpt-4o-mini"]);
-    async def _acompletion(**_kwargs: object) -> dict {
-        return _pool_reply("cost_based_success")();
-    }
-    router(pool).acompletion = _acompletion;
-
-    def get_answer(question: str) -> str by pool();
-
-    assert get_answer("test") == "cost_based_success";
 }
 
 

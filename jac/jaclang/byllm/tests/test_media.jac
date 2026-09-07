@@ -28,35 +28,40 @@ obj Person {
 }
 
 
-test "an image argument is sent as a system prompt, a text block, and a data url" {
+test "an image argument is inlined in its own format, under a system prompt" {
     need("PIL", "Pillow");
-    llm = FakeLLM(replies=[say("The answer to the math question is 42.")]);
+    # (file, expected data-url mime). A webp must not be transcoded to jpeg.
+    for (filename, mime) in [
+        ("math_question.jpg", "data:image/jpeg;base64,"),
+        ("webp_image_of_person.webp", "data:image/webp;base64,")
+    ] {
+        llm = FakeLLM(replies=[say("answered")]);
 
-    def solve_math_question(question_img: Image) -> str by llm();
+        def describe(question_img: Image) -> str by llm();
 
-    answer = solve_math_question(Image(os.path.join(FIXTURE_DIR, "math_question.jpg")));
-    assert answer == "The answer to the math question is 42.";
-    assert roles(llm) == ["system", "user"] , (
-        f"expected a system turn then a user turn, got {roles(llm)}"
-    );
+        assert describe(Image(os.path.join(FIXTURE_DIR, filename))) == "answered";
+        assert roles(llm) == ["system", "user"] , f"{filename}: got {roles(llm)}";
 
-    blocks = user_blocks(llm);
-    assert blocks[0]["type"] == "text" , f"the argument should be introduced by text: {blocks[
-        0
-    ]}";
-    assert "solve_math_question" in blocks[0]["text"] , (
-        f"the caller name introduces the argument, got {blocks[0]['text'][:80]!r}"
-    );
+        blocks = user_blocks(llm);
+        assert blocks[0]["type"] == "text" , f"{filename}: got {blocks[0]}";
+        assert "describe" in blocks[0]["text"] , (
+            f"{filename}: the caller name introduces the argument, got {blocks[0][
+                'text'
+            ][:60]!r}"
+        );
 
-    images = media_blocks(llm);
-    assert len(images) == 1 , f"expected one image block, got {len(images)}";
-    assert data_url(images[0]).startswith("data:image/jpeg;base64,") , (
-        f"a jpeg must be inlined as a jpeg data url, got {data_url(images[0])[:60]!r}"
-    );
+        images = media_blocks(llm);
+        assert len(images) == 1 , f"{filename}: expected one image block, got {len(
+            images
+        )}";
+        assert data_url(images[0]).startswith(mime) , (
+            f"{filename}: expected {mime}, got {data_url(images[0])[:40]!r}"
+        );
+    }
 }
 
 
-test "a webp image keeps its own format and its typed answer is parsed" {
+test "an image answer is parsed into its declared type" {
     need("PIL", "Pillow");
     llm = FakeLLM(
         replies=[
@@ -78,12 +83,6 @@ test "a webp image keeps its own format and its typed answer is parsed" {
     assert person.full_name == "Albert Einstein" , f"got {person!r}";
     assert person.year_of_death == "1955" , f"got {person!r}";
     assert person.personality == Personality.EXTROVERT , f"got {person.personality!r}";
-
-    images = media_blocks(llm);
-    assert len(images) == 1 , f"expected one image block, got {len(images)}";
-    assert data_url(images[0]).startswith("data:image/webp;base64,") , (
-        f"a webp must not be transcoded, got {data_url(images[0])[:60]!r}"
-    );
 }
 
 
