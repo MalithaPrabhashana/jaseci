@@ -1446,6 +1446,29 @@ test "async streaming stays lazy: the producer waits for the consumer" {
 }
 
 
+# Model("mockllm") and Model("local:...") build an inner delegate and hand work
+# to it. Model.invoke did; Model.ainvoke did not, so the async side reached
+# litellm with a model name no provider knows.
+test "Model with a mock delegate streams on the async path" {
+    llm = Model(model_name="mockllm", config={"outputs": ["hello world"]});
+
+    async def _run -> str {
+        return await _drain_8932(await llm.ainvoke(mk_run(stream=True)));
+    }
+    assert asyncio.run(_run()) == "hello world";
+}
+
+
+test "Model with a mock delegate answers on the async no-stream path" {
+    llm = Model(model_name="mockllm", config={"outputs": ["hello world"]});
+
+    async def _run -> object {
+        return await llm.ainvoke(mk_run());
+    }
+    assert asyncio.run(_run()) == "hello world";
+}
+
+
 # The by llm() declaration lives in a fixture: at module level here it perturbs
 # the two tests that compile a fixture with JacProgram().
 test "async def by llm(stream=True) streams end to end" {
