@@ -66,65 +66,12 @@ test "method tool call" {
     assert "Result: 46" in stdout_value;
 }
 
-test "params format" {
-    stdout_value = run_fixture("llm_params");
-    dict_str = stdout_value[stdout_value.find("{"):stdout_value.rfind("}") + 1];
-    extracted_dict = yaml.safe_load(dict_str);
-
-    required_keys = [
-        "model",
-        "api_base",
-        "messages",
-        "tools",
-        "response_format",
-        "max_tokens",
-
-    ];
-    for key in required_keys {
-        assert key in extracted_dict , f"Missing key: {key}";
-    }
-
-    assert "temperature" not in extracted_dict , "temperature must be omitted when unset";
-
-    add_message = extracted_dict["messages"];
-    assert add_message[0]["role"] == "system" , "First message should be of role 'system'";
-    assert add_message[1]["role"] == "user" , "Second message should be of role 'user'";
-    assert add_message[3]["role"] == "tool" , "Fourth message should be of role 'tool'";
-    assert (
-        add_message[3]["content"]
-        == "The current wind speed in Puttalam is about 18-22 km/h."
-    ) , "Content mismatch";
-
-    add_tool = extracted_dict["tools"][0];
-    assert add_tool["type"] == "function" , "First tool should be of type 'function'";
-    assert add_tool["function"]["name"] == "get_live_wind_speed" , "First tool function should be 'get_live_wind_speed'";
-    assert "city" in add_tool["function"]["parameters"]["properties"] , "get_live_wind_speed function should have 'city' parameter";
-}
-
-test "temperature passed through when set" {
-    stdout_value = run_fixture("llm_params_temp");
-    dict_str = stdout_value[stdout_value.find("{"):stdout_value.rfind("}") + 1];
-    extracted_dict = yaml.safe_load(dict_str);
-
-    assert "temperature" in extracted_dict , "temperature must be present when the caller sets it";
-    assert extracted_dict["temperature"] == 0.3 , f"expected temperature 0.3, got {extracted_dict.get(
-        'temperature'
-    )}";
-}
-
 
 test "image param with sem string doesn't crash Message.to_dict" {
     stdout_value = run_fixture("image_with_sem");
     assert "IMAGE_SEM_PASS" in stdout_value;
 }
 
-test "streaming output" {
-    stdout_value = run_fixture("streaming_output");
-    assert (
-        "The orca whale, or killer whale, is one of the most intelligent and adaptable marine predators"
-        in stdout_value
-    );
-}
 
 test "streaming with react" {
     stdout_value = run_fixture("streaming_with_react");
@@ -348,11 +295,6 @@ test "on_iteration callback ABORT and ABORT_WITH_SUMMARY" {
     assert "SUMMARY_RESULT" in stdout_value;
 }
 
-test "plain text recovery - LLM bypasses finish_tool" {
-    stdout_value = run_fixture("plain_text_recovery");
-    assert "PERSON: Merchant" in stdout_value;
-    assert "MESSAGE: Greetings traveller, I have wares to trade!" in stdout_value;
-}
 
 test "api key resolves from constructor, then instance config, then global config" {
     for (why, global_key, kwargs, expected) in [

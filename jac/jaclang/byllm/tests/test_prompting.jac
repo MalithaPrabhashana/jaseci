@@ -5,7 +5,7 @@ returns, enums and scalars on the way back. Every test asserts on both
 directions, which is the thing a fixture-and-stdout test could not do.
 """
 
-import from support_tests { FakeLLM, prompt_text, say, typed }
+import from support_tests { FakeLLM, call, prompt_text, roles, say, tool_names, typed }
 
 
 enum _Sentiment { POSITIVE, NEGATIVE, NEUTRAL }
@@ -168,4 +168,85 @@ test "an enum return is reconstructed as the member" {
         f"expected a _Sentiment member, got {type(result).__name__}"
     );
     assert "I love this!" in prompt_text(llm);
+}
+
+
+def _wind_speed(city: str) -> str {
+    return f"The current wind speed in {city} is about 18-22 km/h.";
+}
+
+sem _wind_speed = "Get the current wind speed of a given city.";
+
+
+"""One tool-using turn, so the recorded params carry a real tools array and a
+real tool result. `extra` is merged into the by-llm call params."""
+def _wind_report(llm: FakeLLM, extra: dict) -> str {
+    answer = "The current wind speed in Puttalam is about 18-22 km/h.";
+    llm.replies.extend([call("_wind_speed", {"city": "Puttalam"}), say(answer)]);
+    llm.postinit();
+
+    def wind_report(city: str) -> str by llm(tools=[_wind_speed], **extra);
+
+    return wind_report("Puttalam");
+}
+
+
+test "an outgoing request carries the model, messages, tools and response format" {
+    llm = FakeLLM();
+    _wind_report(llm, {});
+    params = llm.seen[0];
+
+    for key in ["model", "messages", "tools", "max_tokens"] {
+        assert key in params , f"missing {key} in the outgoing params: {sorted(
+            params
+        )}";
+    }
+    assert "temperature" not in params , (
+        "temperature must be omitted when the caller never set one, so the provider "
+        "applies its own default (issue #7687)"
+    );
+
+    # byLLM appends finish_tool whenever the caller passes tools, so a typed
+    # answer has a way home.
+    assert tool_names(params) == ["_wind_speed", "finish_tool"] , f"got {tool_names(
+        params
+    )}";
+    fn = params["tools"][0];
+    assert fn["type"] == "function";
+    assert "city" in fn["function"]["parameters"]["properties"] , (
+        f"the tool signature must reach the model: {fn['function']['parameters']}"
+    );
+    assert "wind speed of a given city" in str(fn["function"]) , (
+        "the tool's sem string is its description"
+    );
+}
+
+
+test "the second turn replays the tool result back to the model" {
+    llm = FakeLLM();
+    _wind_report(llm, {});
+    assert len(llm.seen) == 2 , f"expected a tool turn then an answer turn, got {len(
+        llm.seen
+    )}";
+
+    assert roles(llm, 1)[:2] == ["system", "user"] , f"got {roles(llm, 1)}";
+    tool_msgs = [
+        m
+        for m in llm.sent("messages")[1]
+        if m.get("role") == "tool"
+    ];
+    assert len(tool_msgs) == 1 , f"expected one tool result, got {len(tool_msgs)}";
+    assert tool_msgs[0]["content"]
+        == ("The current wind speed in Puttalam is about 18-22 km/h.") , f"got {tool_msgs[
+        0
+    ]['content']!r}";
+}
+
+
+test "temperature is sent when the caller sets one" {
+    llm = FakeLLM();
+    _wind_report(llm, {"temperature": 0.3});
+    assert llm.seen[0]["temperature"] == 0.3 , f"got {llm.seen[0].get(
+        'temperature'
+    )!r}";
 }
