@@ -53,20 +53,34 @@ test "the prompt renders each candidate's edge, so routing can choose by it" {
     assert any("priority='high'" in line for (_h, line) in cands) , (
         f"the edge attribute must be rendered, got {cands}"
     );
+
+    # `Agent` carries one ability per walker type. Only the one this walker
+    # triggers may be listed: the line tells the model what visiting will do.
+    offered = " ".join([line for (_h, line) in cands]);
+    assert "runs: log" in offered , f"the firing ability must be named, got {offered!r}";
+    for quiet in ["log_picked", "log_collected", "log_streamed"] {
+        assert quiet not in offered , (
+            f"{quiet} does not fire for `router` and must not be offered: {offered!r}"
+        );
+    }
 }
 
 
 test "an arbitrary node list is offered without a fabricated edge" {
     # `visit` accepts any node list, not just [-->] successors. Standalone nodes
     # have no edge to `here`, so the prompt must not invent one.
-    llm = RoutingLLM();
+    # The model picks both, so `select=1` has to do the truncating: a picker
+    # that returned one anyway would leave that path unexercised.
+    llm = RoutingLLM(pick=lambda (c: list, p: str) { [x[0] for x in c]; });
     rg.llm = llm;
     hub = root ++> Hub();
     loose = [Agent(tag="alpha"), Agent(tag="beta")];
 
     w = picker(options=loose) spawn hub;
 
-    assert len(w.visited) == 1 , f"select=1 should visit one, got {w.visited}";
+    assert len(w.visited) == 1 , (
+        f"select=1 must keep one of the two the model returned, got {w.visited}"
+    );
     lines = " ".join([line for (_h, line) in routing_candidates(llm.seen[0])]);
     for invented in ["(direct)", "here --", "here <-"] {
         assert invented not in lines , (
@@ -77,8 +91,9 @@ test "an arbitrary node list is offered without a fabricated edge" {
 
 
 test "candidates with identical field values stay distinct targets" {
-    # Two parameterless Agents are equal by value. Value-based dedup would
-    # collapse them and visit once; identity-based dedup keeps both.
+    # Two candidates carrying the same field values must both be visited.
+    # Their handles are what has to stay distinct: the router names candidates
+    # by node type, so same-typed siblings collide unless it disambiguates.
     llm = RoutingLLM(pick=lambda (c: list, p: str) { [x[0] for x in c]; });
     rg.llm = llm;
     hub = build_hub([("same", "low"), ("same", "low")]);
@@ -196,8 +211,13 @@ test "a supervisor routes to the agent whose speciality matches the request" {
     w2 = supervisor(user_input="What is (15 + 5) * 2 - (10 / 2)?") spawn team;
     assert w2.answers == [("math", "35")] , f"got {w2.answers}";
 
-    # The user input reaches the routing prompt, which is how the choice is made.
-    assert "Agentic AI" in prompt_text(llm, 0) , "incl_info must carry the user input";
+    # Asserted on the rendered incl_info entry, not on the bare text: the
+    # walker's own repr already carries `user_input=` into every routing
+    # prompt, so a substring match would pass with incl_info dropped entirely.
+    assert (
+        "User input = Write four lines of a poem about Agentic AI"
+        in prompt_text(llm, 0)
+    ) , f"incl_info must reach the routing prompt, got {prompt_text(llm, 0)[:400]!r}";
 }
 
 
