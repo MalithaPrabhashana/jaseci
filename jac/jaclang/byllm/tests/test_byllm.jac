@@ -1354,9 +1354,9 @@ async def _drain_8932(stream: any, pace: float = 0.0) -> str {
 }
 
 
-"""Drive one LLM down the async streaming path."""
+"""Drive one LLM down the async streaming path, as `by llm()` does."""
 async def _stream_8932(llm: _byllm_llm_mod.BaseLLM, pace: float = 0.0) -> str {
-    return await _drain_8932(llm.adispatch_streaming(mk_run(stream=True)), pace);
+    return await _drain_8932(await llm.ainvoke(mk_run(stream=True)), pace);
 }
 
 
@@ -1403,30 +1403,57 @@ async def _ticked_stream_8932(llm: _byllm_llm_mod.BaseLLM) -> tuple[int, str] {
 }
 
 
-test "BaseLLM.model_call_with_stream_async is a coroutine, not an async generator" {
-    fn = _byllm_llm_mod.BaseLLM.model_call_with_stream_async;
-    assert not inspect.isasyncgenfunction(fn) , "awaiting one raises TypeError";
-    assert inspect.iscoroutinefunction(fn) , "must be a coroutine, matching Model";
+test "async streaming delivers every provider shape" {
+    cases: list[tuple] = [
+        (
+            "subclass inheriting the base method",
+            FakeLLM(model_name="fake-8932", replies=[say("hello world")]),
+            "hello world"
+        ),
+        (
+            "MockLLM, which overrides adispatch_streaming",
+            _byllm_llm_mod.MockLLM(
+                model_name="mockllm", config={"outputs": ["hello world"]}
+            ),
+            "hello world"
+        ),
+        (
+            "provider call returning a list, as ModelPool cost-based-routing does",
+            _EagerStream8932(model_name="list-8932"),
+            "eager list"
+        ),
+        (
+            "Model delegating to its mock",
+            Model(model_name="mockllm", config={"outputs": ["hello world"]}),
+            "hello world"
+        )
+    ];
+    for (label, llm, expected) in cases {
+        assert asyncio.run(_stream_8932(llm)) == expected , label;
+    }
 }
 
 
-test "async streaming works on a subclass that inherits the base method" {
-    llm = FakeLLM(model_name="fake-8932", replies=[say("hello world")]);
-    assert asyncio.run(_stream_8932(llm)) == "hello world";
+def _probe_tool_8932(query: str) -> str {
+    return "probe";
 }
 
 
-test "async streaming works on MockLLM" {
-    llm = _byllm_llm_mod.MockLLM(
-        model_name="mockllm", config={"outputs": ["hello world"]}
-    );
-    assert asyncio.run(_stream_8932(llm)) == "hello world";
+async def _ainvoke_8932(llm: _byllm_llm_mod.BaseLLM, run: MTRuntime) -> object {
+    return await llm.ainvoke(run);
 }
 
 
-test "async streaming accepts a provider call that returns a list" {
-    llm = _EagerStream8932(model_name="list-8932");
-    assert asyncio.run(_stream_8932(llm)) == "eager list";
+test "Model hands async work to its delegate off the streaming path" {
+    # Both ainvoke branches: handled_directly, and the tools-bound fall-through.
+    cases: list[tuple] = [
+        ("no stream, no tools", mk_run()),
+        ("tools bound", mk_run(tools=[_probe_tool_8932]))
+    ];
+    for (label, run) in cases {
+        llm = Model(model_name="mockllm", config={"outputs": ["hello world"]});
+        assert asyncio.run(_ainvoke_8932(llm, run)) == "hello world" , label;
+    }
 }
 
 
@@ -1443,29 +1470,6 @@ test "async streaming stays lazy: the producer waits for the consumer" {
     assert asyncio.run(_stream_8932(llm, pace=0.12)) == "one two three";
     gaps = [llm.produced[i] - llm.produced[i - 1] for i in range(1, len(llm.produced))];
     assert all(g > 0.08 for g in gaps) , f"stream was buffered, not lazy: {gaps}";
-}
-
-
-# Model("mockllm") and Model("local:...") build an inner delegate and hand work
-# to it. Model.invoke did; Model.ainvoke did not, so the async side reached
-# litellm with a model name no provider knows.
-test "Model with a mock delegate streams on the async path" {
-    llm = Model(model_name="mockllm", config={"outputs": ["hello world"]});
-
-    async def _run -> str {
-        return await _drain_8932(await llm.ainvoke(mk_run(stream=True)));
-    }
-    assert asyncio.run(_run()) == "hello world";
-}
-
-
-test "Model with a mock delegate answers on the async no-stream path" {
-    llm = Model(model_name="mockllm", config={"outputs": ["hello world"]});
-
-    async def _run -> object {
-        return await llm.ainvoke(mk_run());
-    }
-    assert asyncio.run(_run()) == "hello world";
 }
 
 
