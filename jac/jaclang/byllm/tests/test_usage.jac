@@ -8,6 +8,8 @@ telemetry field. All three share the same recording machinery.
 """
 
 import asyncio;
+import contextlib;
+import io;
 import unittest.mock;
 import types;
 import dataclasses;
@@ -253,12 +255,21 @@ test "every dispatch path reports the cost litellm computes for the call" {
 test "cost is omitted rather than guessed when it cannot be computed" {
     for (label, resp) in [
         ("unpriceable model", _response(model=UNPRICEABLE)),
+        ("model litellm cannot map to a provider", _response(model="acme-internal-llm")),
         ("response with no usage data", _response(usage={}))
     ] {
-        usage = _usage_from("dispatch_no_streaming", resp);
+        printed = io.StringIO();
+        with contextlib.redirect_stdout(printed) {
+            usage = _usage_from("dispatch_no_streaming", resp);
+        }
         assert _cost_of(usage) is None , (
             f"{label} reported cost={_cost_of(usage)}; unknown must stay distinct "
             "from free"
+        );
+        # The failed lookup is expected and swallowed, so litellm's
+        # provider-list hint for it is noise on every call.
+        assert "Provider List" not in printed.getvalue() , (
+            f"{label}: the cost lookup printed {printed.getvalue()!r}"
         );
         if resp["usage"] {
             assert usage["prompt_tokens"] == TOKENS["prompt_tokens"] , (
