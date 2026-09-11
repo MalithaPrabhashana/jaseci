@@ -182,7 +182,8 @@ obj MockLLM(BaseLLM) {
         outputs: list = [],
         seen_prompts: list = [],
         seen: list = [],
-        chunk_size: int = 12;
+        chunk_size: int = 12,
+        _queue: list | None = None;
 
     def postinit -> None;
     override def model_call_no_stream(params: dict) -> object;
@@ -190,6 +191,7 @@ obj MockLLM(BaseLLM) {
     def sent(key: str) -> list;
     def exhausted -> bool;
     def _next_reply(params: dict) -> MockRawResponse | MockError;
+    def _current_queue -> list;
 }
 
 obj LocalLLM(BaseLLM) {
