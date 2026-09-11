@@ -92,7 +92,7 @@ def stream_story(topic: str) -> str by llm(stream=True);
 
 ## Testing with MockLLM
 
-Runs without API keys - mock outputs are consumed sequentially, one per `by` call. For typed returns put pre-built instances in `outputs` (e.g. `Priority.HIGH`, `[Task(...)]`). See `jac-testing` for `jac test` mechanics.
+Runs without API keys - mock outputs are consumed sequentially, one per model call, and byLLM still builds the real request and parses the reply. For typed returns put the values in `outputs` (e.g. `Priority.HIGH`, `[Task(...)]`); a `MockToolCall` must name a tool the function offers. `llm.sent("messages")` shows what was sent. See `jac-testing` for `jac test` mechanics.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM }

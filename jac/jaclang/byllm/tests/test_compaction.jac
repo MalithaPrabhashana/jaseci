@@ -311,18 +311,8 @@ test "compaction_enabled false suppresses proactive and emergency paths" {
 # Hook used instead of default compactor: at first dispatch mt_run has only
 # [system, user] = 2 messages, too few for the default slice to be non-empty.
 test "ContextWindowExceededError triggers emergency compaction and retries" {
-    def finish_tool(final_output: str) -> str {
-        return final_output;
-    }
-
-    llm = MockLLM(
-        model_name="mockllm",
-        config={
-            "outputs": [
-                (MockToolCall(tool=finish_tool, args={"final_output": "recovered"}), {})
-            ]
-        }
-    );
+    # No tools are offered, so the retried call answers in plain text.
+    llm = MockLLM(model_name="mockllm", config={"outputs": ["recovered"]});
 
     hook_called = [False];
     def hook(msgs: list, keep_recent: int) -> list {
