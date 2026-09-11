@@ -682,21 +682,17 @@ def _compaction_case -> MTRuntime {
     ];
     messages = [sys_msg, user_msg] + round1 + round1 + round1;
 
-    # MockLLM's usage-injection tuple only recognizes tool-call outputs, and
-    # the summariser returns a plain string, so use a real Model instead.
-    summariser = Model(model_name="test-model");
+    summariser = MockLLM(
+        model_name="test-model",
+        outputs=[
+            (
+                "a summary",
+                {"prompt_tokens": 200, "completion_tokens": 20, "total_tokens": 220}
+            )
+        ]
+    );
     parent_mt = _mt();
-
-    with unittest.mock.patch.object(
-        summariser,
-        "model_call_no_stream",
-        return_value=_response(
-            {"prompt_tokens": 200, "completion_tokens": 20, "total_tokens": 220},
-            content="a summary"
-        )
-    ) {
-        _byllm_llm_mod._default_compact(messages, 1, summariser, parent_mt);
-    }
+    _byllm_llm_mod._default_compact(messages, 1, summariser, parent_mt);
     return parent_mt;
 }
 
