@@ -359,6 +359,8 @@ test "translate" {
 !!! tip "Running Tests"
     Run with: `jac test <filename>.jac`
 
+For typed outputs, tool calls, token usage and errors, see [Testing with MockLLM](../../reference/plugins/byllm.md#testing-with-mockllm).
+
 ---
 
 ## Key Takeaways
