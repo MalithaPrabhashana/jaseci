@@ -6,14 +6,13 @@ Assert on the message blocks byLLM actually sent, not on a rendered string.
 import os;
 import from jaclang.byllm.lib { Image, Video }
 import from support_tests {
-    FakeLLM,
+    mock_llm,
     prompt_text,
     data_url,
     media_blocks,
     need,
     roles,
     say,
-    typed,
     user_blocks
 }
 
@@ -36,7 +35,7 @@ test "an image argument is inlined in its own format, under a system prompt" {
         ("math_question.jpg", "data:image/jpeg;base64,"),
         ("webp_image_of_person.webp", "data:image/webp;base64,")
     ] {
-        llm = FakeLLM(replies=[say("answered")]);
+        llm = mock_llm([say("answered")]);
 
         def describe(question_img: Image) -> str by llm();
 
@@ -64,15 +63,13 @@ test "an image argument is inlined in its own format, under a system prompt" {
 
 test "an image answer is parsed into its declared type" {
     need("PIL", "Pillow");
-    llm = FakeLLM(
-        replies=[
-            typed(
-                {
-                    "full_name": "Albert Einstein",
-                    "year_of_death": "1955",
-                    "personality": Personality.EXTROVERT.value
-                }
-            )
+    llm = mock_llm(
+        [
+            {
+                "full_name": "Albert Einstein",
+                "year_of_death": "1955",
+                "personality": Personality.EXTROVERT.value
+            }
         ]
     );
 
@@ -93,7 +90,7 @@ test "a video argument is sampled into several inlined frames" {
         "The video features a large rabbit emerging from a burrow in a lush, "
         "green environment."
     );
-    llm = FakeLLM(replies=[say(explanation)]);
+    llm = mock_llm([say(explanation)]);
 
     def explain_the_video(video: Video) -> str by llm();
 
@@ -115,7 +112,7 @@ test "a video argument is sampled into several inlined frames" {
 
 
 # `sem` is module-level, so this pair sits beside its test.
-glob _sem_llm = FakeLLM(replies=[say("A hot air balloon.")]);
+glob _sem_llm = mock_llm([say("A hot air balloon.")]);
 
 def _describe_image(img: Image) -> str by _sem_llm();
 
