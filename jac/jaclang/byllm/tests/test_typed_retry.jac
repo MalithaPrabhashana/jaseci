@@ -9,7 +9,7 @@ import asyncio;
 import os;
 import from pathlib { Path }
 import from jaclang.byllm.config_loader { get_byllm_config, reset_byllm_config }
-import from support_tests { FakeLLM, fail, prompt_text, say }
+import from support_tests { mock_llm, fail, prompt_text, say }
 
 glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures");
 
@@ -20,8 +20,8 @@ obj RetryPerson {
 }
 
 
-glob _arecover = FakeLLM(
-         replies=[
+glob _arecover = mock_llm(
+         [
              say('{"name": "Zoe", "age":'),
              say('{"schema_object_wrapper": {"name": "Zoe", "age": 27}}')
          ]
@@ -31,8 +31,8 @@ async def _aget_person -> RetryPerson by _arecover();
 
 
 test "broken json is regenerated, and the retry prompt shows what was wrong" {
-    llm = FakeLLM(
-        replies=[
+    llm = mock_llm(
+        [
             say('{"name": "Ada", "age":'),
             say('{"schema_object_wrapper": {"name": "Ada", "age": 36}}')
         ]
@@ -65,7 +65,7 @@ test "retries are bounded, and the error reports how many were spent" {
         ("default limit", {}, 4, 3),
         ("instance limit of 1", {"max_output_retries": 1}, 2, 1)
     ] {
-        llm = FakeLLM(replies=[say(f"nope-{i}") for i in range(6)]);
+        llm = mock_llm([say(f"nope-{i}") for i in range(6)]);
 
         def get_person -> RetryPerson by llm(**call_params);
 
@@ -91,7 +91,7 @@ test "retries are bounded, and the error reports how many were spent" {
 test "only a conversion failure is retried" {
     # A ValueError from the model is not a parse problem, so it propagates on
     # the first attempt rather than burning the retry budget.
-    boom = FakeLLM(replies=[fail(ValueError("boom")), say("never reached")]);
+    boom = mock_llm([fail(ValueError("boom")), say("never reached")]);
 
     def get_person -> RetryPerson by boom();
 
@@ -105,7 +105,7 @@ test "only a conversion failure is retried" {
     assert len(boom.seen) == 1 , f"it must not retry, got {len(boom.seen)} attempts";
 
     # A str return has nothing to convert, so even an empty answer is accepted.
-    empty = FakeLLM(replies=[say("")]);
+    empty = mock_llm([say("")]);
 
     def get_text -> str by empty();
 
