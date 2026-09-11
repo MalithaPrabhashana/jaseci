@@ -21,9 +21,8 @@ glob FIXTURE_DIR = os.path.join(
      COMPACTION_TOML_FIXTURE = os.path.join(FIXTURE_DIR, "compaction_config");
 
 
-# MockLLM.dispatch_no_streaming adds the assistant message as a string, which
-# _default_compact's role-detection cannot recognise. So pipeline tests use a
-# hook; structural correctness of _default_compact is verified separately.
+# Pipeline tests compact through a hook so they check when compaction fires,
+# not how _default_compact slices; that is verified separately.
 test "above threshold compacts and next iteration sees shortened messages" {
     def step_a -> str {
         return "stepped";

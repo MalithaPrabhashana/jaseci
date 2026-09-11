@@ -274,16 +274,10 @@ def _apply_prompt_caching(messages: list[object], tools: list | None) {
 
 
 def _quiet_lookup(lookup: Callable, fallback: any) -> any {
-    with _QUIET_LOOKUP_LOCK {
-        prev = getattr(litellm, "suppress_debug_info", False);
-        setattr(litellm, "suppress_debug_info", True);
-        try {
-            return lookup();
-        } except Exception {
-            return fallback;
-        } finally {
-            setattr(litellm, "suppress_debug_info", prev);
-        }
+    try {
+        return lookup();
+    } except Exception {
+        return fallback;
     }
 }
 

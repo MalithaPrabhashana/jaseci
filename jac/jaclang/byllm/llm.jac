@@ -3,7 +3,6 @@ import from jaclang.byllm._optdeps.loguru { logger }
 import os;
 import sys;
 import json;
-import threading;
 import random;
 import time;
 
@@ -62,13 +61,12 @@ with entry {
     if _litellm_config['local_cost_map'] {
         os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True";
     }
+    litellm.suppress_debug_info = not _litellm_config.get("debug", False);
 }
 
 glob _TOOL_DELTA_MIN_CHARS = 48,
      _TOOL_DELTA_MIN_INTERVAL_S = 0.15,
      _TOOL_DELTA_MAX_PER_CALL = 200;
-
-glob _QUIET_LOOKUP_LOCK = threading.Lock();
 
 glob DEFAULT_BASE_URL = "http://localhost:4000",
      MODEL_MOCK = "mockllm";
