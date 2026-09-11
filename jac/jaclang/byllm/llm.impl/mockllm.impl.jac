@@ -195,6 +195,15 @@ def _mock_chunks(turn: MockRawResponse, model: str, size: int) -> list {
 
 impl MockLLM.postinit -> None {
     _configure_litellm();
+    queued = self.config.get("outputs");
+    if self.outputs and queued {
+        raise ValueError("MockLLM takes outputs= or config['outputs'], not both");
+    }
+    if self.outputs or queued is None {
+        self.config["outputs"] = self.outputs;
+    } else {
+        self.outputs = queued;
+    }
 }
 
 impl MockLLM._next_reply(params: dict) -> MockRawResponse | MockError {

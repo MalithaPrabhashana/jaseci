@@ -23,8 +23,8 @@ import from jaclang.byllm.mcp { McpClient, McpTool }
 import from jaclang.byllm.types { Tool, Message, MessageRole }
 import dataclasses;
 import from jaclang { JacRuntimeInterface as Jac }
+import from jaclang.byllm.lib { MockLLM }
 import from support_tests {
-    mock_llm,
     scripted,
     finish,
     mk_run,
@@ -46,7 +46,7 @@ def _as_any(v: any) -> any {
 
 
 test "the deprecated method= parameter still runs and warns once" {
-    llm = mock_llm([say("test output")]);
+    llm = MockLLM(outputs=[say("test output")]);
 
     def simple_tool -> str {
         return "tool ran";
@@ -444,7 +444,7 @@ test "dispatch heals a misnamed finish argument and recovers an unusable one" {
         ("sync unusable", _UNUSABLE_FINISH, False, False),
         ("async unusable", _UNUSABLE_FINISH, True, False)
     ] {
-        llm = mock_llm(
+        llm = MockLLM(
             model_name="test-model", outputs=[tool_call("finish_tool", arguments)]
         );
         mt_run = mk_run(resp_type=_TestPerson, finish=True);
@@ -732,7 +732,7 @@ test "_stream_final_answer keeps the tools array intact" {
         return y;
     }
 
-    llm = mock_llm(model_name="anthropic/claude-test", outputs=[say("Done.")]);
+    llm = MockLLM(model_name="anthropic/claude-test", outputs=[say("Done.")]);
     mt_run = mk_run(tools=[tool_a, tool_b], stream=True);
     expected = [t.get_name() for t in mt_run.tools];
 
@@ -752,7 +752,7 @@ test "finish_tool exit sends an identical tools payload on the narration call" {
         return f"found: {query}";
     }
 
-    llm = mock_llm(
+    llm = MockLLM(
         model_name="anthropic/claude-test",
         outputs=[finish("Fixed it."), say("Fixed it.")]
     );
@@ -782,7 +782,7 @@ test "forced answer and recovery force finish_tool, keep the tools array, and he
         ("unusable", _UNUSABLE_FINISH, None)
     ] {
         expect_typed = expected_name is not None;
-        llm = mock_llm(
+        llm = MockLLM(
             model_name="anthropic/claude-test",
             outputs=[tool_call("finish_tool", arguments)]
         );
@@ -801,7 +801,7 @@ test "forced answer and recovery force finish_tool, keep the tools array, and he
             assert not isinstance(out, _TestPerson) , f"force {why}: expected degradation, got: {out}";
         }
 
-        llm = mock_llm(
+        llm = MockLLM(
             model_name="anthropic/claude-test",
             outputs=[tool_call("finish_tool", arguments)]
         );
@@ -912,7 +912,7 @@ test "async streaming delivers every provider shape" {
     cases: list[tuple] = [
         (
             "subclass inheriting the base method",
-            mock_llm(model_name="fake-8932", outputs=[say("hello world")]),
+            MockLLM(model_name="fake-8932", outputs=[say("hello world")]),
             "hello world"
         ),
         (

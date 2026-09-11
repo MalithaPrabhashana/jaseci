@@ -721,7 +721,7 @@ test "byLLM's own follow-up calls get a call_kind distinct from react_iteration"
 
 
 test "usage StreamEvent always terminates a logging=True stream, even with no usage data" {
-    llm = MockLLM(model_name="mockllm", config={"outputs": ["hello there"]});
+    llm = MockLLM(outputs=["hello there"]);
 
     def my_task(q: str) -> str by llm(stream=True, logging=True);
 
@@ -806,25 +806,22 @@ test "cache token fields are normalized onto every recorded call, regardless of 
 
 test "usage_step fires once per underlying call, scoped to that call's own usage" {
     llm = MockLLM(
-        model_name="mockllm",
-        config={
-            "outputs": [
-                (
-                    MockToolCall(tool=step_a, args={}),
-                    {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
-                ),
-                (
-                    MockToolCall(tool=finish_tool, args={"final_output": "done"}),
-                    {"prompt_tokens": 200, "completion_tokens": 20, "total_tokens": 220}
-                ),
-                # A str-returning finish_tool call always triggers a
-                # final_answer_restream - the 3rd underlying call.
-                (
-                    "done",
-                    {"prompt_tokens": 300, "completion_tokens": 30, "total_tokens": 330}
-                )
-            ]
-        }
+        outputs=[
+            (
+                MockToolCall(tool=step_a, args={}),
+                {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+            ),
+            (
+                MockToolCall(tool=finish_tool, args={"final_output": "done"}),
+                {"prompt_tokens": 200, "completion_tokens": 20, "total_tokens": 220}
+            ),
+            # A str-returning finish_tool call always triggers a
+            # final_answer_restream - the 3rd underlying call.
+            (
+                "done",
+                {"prompt_tokens": 300, "completion_tokens": 30, "total_tokens": 330}
+            )
+        ]
     );
 
     def task(q: str) -> str by llm(tools=[step_a], stream=True, logging=True);
@@ -1002,15 +999,12 @@ test "usage_step fires for the recovery call" {
 
 test "usage_step does not fire for the no-tools branch" {
     llm = MockLLM(
-        model_name="mockllm",
-        config={
-            "outputs": [
-                (
-                    "hello there",
-                    {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
-                )
-            ]
-        }
+        outputs=[
+            (
+                "hello there",
+                {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+            )
+        ]
     );
 
     def task(q: str) -> str by llm(stream=True, logging=True);
@@ -1047,20 +1041,17 @@ test "_usage_history_total_cost sums real cost across recorded calls" {
 
 test "on_iteration's IterationContext exposes real cumulative total_cost" {
     llm = MockLLM(
-        model_name="mockllm",
-        config={
-            "outputs": [
-                (
-                    MockToolCall(tool=step_a, args={}),
-                    {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
-                ),
-                (
-                    MockToolCall(tool=finish_tool, args={"final_output": "done"}),
-                    {"prompt_tokens": 50, "completion_tokens": 5, "total_tokens": 55}
-                ),
-                "done"
-            ]
-        }
+        outputs=[
+            (
+                MockToolCall(tool=step_a, args={}),
+                {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+            ),
+            (
+                MockToolCall(tool=finish_tool, args={"final_output": "done"}),
+                {"prompt_tokens": 50, "completion_tokens": 5, "total_tokens": 55}
+            ),
+            "done"
+        ]
     );
 
     seen_contexts: list[IterationContext] = [];
@@ -1090,16 +1081,13 @@ test "on_iteration's IterationContext exposes real cumulative total_cost" {
 
 test "llm_timing no longer duplicates token counts now that usage_step exists" {
     llm = MockLLM(
-        model_name="mockllm",
-        config={
-            "outputs": [
-                (
-                    MockToolCall(tool=finish_tool, args={"final_output": "done"}),
-                    {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
-                ),
-                "done"
-            ]
-        }
+        outputs=[
+            (
+                MockToolCall(tool=finish_tool, args={"final_output": "done"}),
+                {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+            ),
+            "done"
+        ]
     );
 
     def task(q: str) -> str by llm(tools=[step_a], stream=True, logging=True);

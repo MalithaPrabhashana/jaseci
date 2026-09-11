@@ -5,8 +5,8 @@ Assert on the message blocks byLLM actually sent, not on a rendered string.
 
 import os;
 import from jaclang.byllm.lib { Image, Video }
+import from jaclang.byllm.lib { MockLLM }
 import from support_tests {
-    mock_llm,
     prompt_text,
     data_url,
     media_blocks,
@@ -35,7 +35,7 @@ test "an image argument is inlined in its own format, under a system prompt" {
         ("math_question.jpg", "data:image/jpeg;base64,"),
         ("webp_image_of_person.webp", "data:image/webp;base64,")
     ] {
-        llm = mock_llm([say("answered")]);
+        llm = MockLLM(outputs=[say("answered")]);
 
         def describe(question_img: Image) -> str by llm();
 
@@ -63,8 +63,8 @@ test "an image argument is inlined in its own format, under a system prompt" {
 
 test "an image answer is parsed into its declared type" {
     need("PIL", "Pillow");
-    llm = mock_llm(
-        [
+    llm = MockLLM(
+        outputs=[
             {
                 "full_name": "Albert Einstein",
                 "year_of_death": "1955",
@@ -90,7 +90,7 @@ test "a video argument is sampled into several inlined frames" {
         "The video features a large rabbit emerging from a burrow in a lush, "
         "green environment."
     );
-    llm = mock_llm([say(explanation)]);
+    llm = MockLLM(outputs=[say(explanation)]);
 
     def explain_the_video(video: Video) -> str by llm();
 
@@ -112,7 +112,7 @@ test "a video argument is sampled into several inlined frames" {
 
 
 # `sem` is module-level, so this pair sits beside its test.
-glob _sem_llm = mock_llm([say("A hot air balloon.")]);
+glob _sem_llm = MockLLM(outputs=[say("A hot air balloon.")]);
 
 def _describe_image(img: Image) -> str by _sem_llm();
 

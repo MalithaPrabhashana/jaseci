@@ -180,7 +180,9 @@ obj BaseLLM {
 }
 
 obj MockLLM(BaseLLM) {
-    has seen_prompts: list = [],
+    has model_name: str = MODEL_MOCK,
+        outputs: list = [],
+        seen_prompts: list = [],
         seen: list = [],
         chunk_size: int = 12;
 

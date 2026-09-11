@@ -3,7 +3,7 @@
 Tests fake the model with `MockLLM`, which replaces only the network call, so byLLM
 builds the real request and parses the reply. The builders below script its turns:
 
-    llm = mock_llm([call("lookup", {"q": "x"}), say("done")]);
+    llm = MockLLM(outputs=[call("lookup", {"q": "x"}), say("done")]);
     def task(q: str) -> str by llm(tools=[lookup]);
     assert task("x") == "done";
     assert llm.sent("tools")[0] is not None;
@@ -88,19 +88,6 @@ def fail(error: Exception, content: str = "", after: int = 0) -> MockError {
 }
 
 
-"""A MockLLM replying with `outputs` in order. The name defaults to a real model, so
-cost lookup and model-specific request shaping behave as in production."""
-def mock_llm(
-    outputs: list | None = None, model_name: str = "gpt-4o-mini", chunk_size: int = 12
-) -> MockLLM {
-    return MockLLM(
-        model_name=model_name,
-        config={"outputs": list(outputs or [])},
-        chunk_size=chunk_size
-    );
-}
-
-
 """Tool names as the model would see them in one recorded params dict."""
 def tool_names(params: dict) -> list {
     return [t["function"]["name"] for t in (params.get("tools") or [])];
@@ -118,7 +105,7 @@ obj Scripted {
     def __enter__ -> MockLLM {
         fake = MockLLM(
             model_name=self.model.model_name,
-            config={"outputs": list(self.replies)},
+            outputs=list(self.replies),
             chunk_size=self.chunk_size
         );
         for name in [
@@ -376,8 +363,7 @@ A graph whose nodes also make their own `by llm()` calls sends both kinds throug
 one model, so a prompt with no candidates falls through to the scripted replies.
 """
 obj RoutingLLM(MockLLM) {
-    has model_name: str = "gpt-4o-mini",
-        pick: Callable = lambda (c: list, p: str) { [c[0][0]] if c else []; };
+    has pick: Callable = lambda (c: list, p: str) { [c[0][0]] if c else []; };
 
     override def model_call_no_stream(params: dict) -> object {
         self._queue_route(params);
@@ -396,9 +382,7 @@ obj RoutingLLM(MockLLM) {
     def _queue_route(params: dict) {
         candidates = routing_candidates(params);
         if candidates {
-            self.config.setdefault("outputs", []).insert(
-                0, self.pick(candidates, str(params.get("messages")))
-            );
+            self.outputs.insert(0, self.pick(candidates, str(params.get("messages"))));
         }
     }
 }

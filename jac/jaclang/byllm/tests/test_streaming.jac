@@ -9,8 +9,8 @@ import contextvars;
 import from jaclang.byllm.exceptions { ConfigurationError }
 import from jaclang.byllm.telemetry { _current_invocation_id }
 import from jaclang.byllm.lib { Model }
+import from jaclang.byllm.lib { MockLLM }
 import from support_tests {
-    mock_llm,
     call,
     chunk_text,
     event_types,
@@ -32,7 +32,7 @@ test "a streaming call yields the answer in pieces, not all at once" {
         "social structures and sophisticated hunting techniques, orcas exhibit "
         "remarkable teamwork while pursuing prey."
     );
-    llm = mock_llm([say(essay)], chunk_size=12);
+    llm = MockLLM(outputs=[say(essay)], chunk_size=12);
 
     """Generate a short essay about the given topic."""
     def generate_essay(topic: str) -> str by llm(stream=True);
@@ -58,7 +58,9 @@ def get_weather(city: str) -> str {
 
 
 test "a logging stream with no tools yields chunks then one usage event" {
-    llm = mock_llm([say("Jac is a programming language designed for the AI era.")]);
+    llm = MockLLM(
+        outputs=[say("Jac is a programming language designed for the AI era.")]
+    );
 
     """Explain what Jac is in one sentence."""
     def explain_jac(topic: str) -> str by llm(stream=True, logging=True);
@@ -83,8 +85,8 @@ test "a logging stream with no tools yields chunks then one usage event" {
 
 test "a logging stream with tools reports the call, the result, then the answer" {
     answer = "Based on the information gathered, London is sunny at 25 degrees.";
-    llm = mock_llm(
-        [
+    llm = MockLLM(
+        outputs=[
             call("get_weather", {"city": "London"}),
             finish("The weather in London is sunny, 25 degrees."),
             say(answer)
@@ -133,7 +135,7 @@ test "a str answer that skips finish_tool still arrives on the chunk channel" {
     # A tool is offered so the ReAct loop is entered, but the model answers in
     # plain text instead of calling finish_tool. The terminal text must reach
     # `chunk`, not be left as thought-only.
-    llm = mock_llm([say("It is sunny in London, about 25 degrees.")]);
+    llm = MockLLM(outputs=[say("It is sunny in London, about 25 degrees.")]);
 
     def answer(question: str) -> str by llm(
         tools=[get_weather], stream=True, logging=True
@@ -149,7 +151,7 @@ test "a str answer that skips finish_tool still arrives on the chunk channel" {
 test "a structured return cannot stream without a handler to consume it" {
     # Streaming a non-str return has no well-defined result unless something
     # consumes the events, so it is rejected up front rather than half-working.
-    llm = mock_llm([[1]]);
+    llm = MockLLM(outputs=[[1]]);
 
     def pick(options: str) -> list[int] by llm(stream=True);
 
@@ -211,7 +213,7 @@ test "a stream survives being consumed from a foreign context" {
         ("thread pool", _drain_in_thread_pool)
     ] {
         answer = f"alpha beta gamma from a {label}";
-        llm = mock_llm([say(answer)]);
+        llm = MockLLM(outputs=[say(answer)]);
 
         def stream_answer -> str by llm(stream=True);
 
@@ -325,8 +327,8 @@ test "a streaming react call runs its tools, then streams the answer" {
         return f"Result: {eval(expression)}";
     }
     answer = "Today is 29-10-2025 and 25 multiplied by 4 equals 100.";
-    llm = mock_llm(
-        [
+    llm = MockLLM(
+        outputs=[
             call("get_current_date", {}),
             call("calculate", {"expression": "25 * 4"}),
             finish(answer),
