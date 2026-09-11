@@ -44,12 +44,12 @@ def _mock_jsonable(value: object) -> object {
 
 
 def _mock_turn(output: object) -> MockRawResponse | MockError {
-    usage_keys = ("prompt_tokens", "completion_tokens", "total_tokens");
+    counters = ("prompt_tokens", "completion_tokens", "total_tokens");
     usage: dict | None = None;
     if isinstance(output, tuple)
         and len(output) == 2
         and isinstance(output[1], dict)
-        and all(k in usage_keys for k in output[1]) {
+        and (not output[1] or any(k in output[1] for k in counters)) {
         usage = dict(output[1]);
         output = output[0];
     }
