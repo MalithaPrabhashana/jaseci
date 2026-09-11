@@ -165,7 +165,7 @@ def tldr(article: str) -> str by summarizer();
 | `ca_bundle` | str/bool | SSL certificate path, `True` for default, `False` to skip verification |
 | `api_key` | str | API key (alternative to constructor parameter) |
 | `verbose` | bool | Enable verbose/debug logging |
-| `outputs` | list | Mock responses for `MockLLM` testing |
+| `outputs` | list | Replies for `Model(model_name="mockllm")`, see [Testing with MockLLM](#testing-with-mockllm) |
 
 **Example with config:**
 
@@ -2062,46 +2062,27 @@ def get_product(prompt: str) -> Product by llm(stream=True);
 
 ## Testing with MockLLM
 
-`MockLLM` stands in for the model provider, so tests run without API keys. Only the network call is replaced: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer. Outputs are consumed in order, one per model call. `model_name` defaults to `mockllm`, and the older `config={"outputs": [...]}` spelling still works:
+`MockLLM` stands in for the model provider, so tests run without API keys. It replaces only the network call: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM }
 
-glob llm = MockLLM(outputs=["Mocked response 1", "Mocked response 2"]);
+enum Priority { LOW = "low", HIGH = "high" }
+
+glob llm = MockLLM(outputs=["Bonjour", Priority.HIGH]);
 
 def translate(text: str) -> str by llm();
-def summarize(text: str) -> str by llm();
+def triage(ticket: str) -> Priority by llm();
 
-test "translate returns first mock" {
-    result = translate("Hello");
-    assert result == "Mocked response 1";
-}
-
-test "summarize returns second mock" {
-    result = summarize("Long text...");
-    assert result == "Mocked response 2";
+test "outputs come back typed, and the request is recorded" {
+    assert translate("Hello") == "Bonjour";
+    assert triage("Login is down") == Priority.HIGH;
+    assert "Hello" in str(llm.sent("messages")[0]);
+    assert llm.exhausted();
 }
 ```
 
-Every request is recorded, so a test can check what byLLM sent as well as what came back. `llm.seen` holds each request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), `llm.seen_prompts` the prompt text of each call, and `llm.exhausted()` whether every output was used:
-
-```jac
-import from jaclang.byllm.lib { MockLLM }
-
-test "the input reaches the model" {
-    mock = MockLLM(outputs=["Bonjour"]);
-    def greet(text: str) -> str by mock();
-    assert greet("Hello") == "Bonjour";
-    assert "Hello" in str(mock.sent("messages")[0]);
-    assert mock.exhausted();
-}
-```
-
-`MockLLM` is useful for:
-
-- Unit testing LLM-powered functions without API costs
-- Deterministic assertions on function behavior and on the request it makes
-- CI/CD pipelines where API keys aren't available
+Outputs are consumed in order, one per model call, so a tool loop takes one per step. `llm.seen` holds every request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), and `llm.seen_prompts` the prompt text of each call. `model_name` defaults to `mockllm`, and `config={"outputs": [...]}` still works in place of `outputs=`.
 
 #### What each output becomes
 
@@ -2115,34 +2096,9 @@ test "the input reaches the model" {
 | `MockError(error=..., content="", after=0)` | the provider raising `error`; on a stream, `content` arrives first and the error fires after `after` chunks |
 | `(entry, usage_dict)` | the entry, with token usage attached |
 
-For a typed return, queue the value itself:
+#### Token usage (for compaction tests)
 
-```jac
-import from jaclang.byllm.lib { MockLLM }
-
-enum Priority { LOW = "low", HIGH = "high" }
-
-obj Task {
-    has title: str,
-        priority: Priority;
-}
-
-glob llm = MockLLM(
-    outputs=[Priority.HIGH, [Task(title="Fix login", priority=Priority.HIGH)]]
-);
-
-def triage(ticket: str) -> Priority by llm();
-def plan(goal: str) -> list[Task] by llm();
-
-test "typed outputs round-trip through the parser" {
-    assert triage("Login is down") == Priority.HIGH;
-    assert plan("Ship it")[0].title == "Fix login";
-}
-```
-
-#### Injecting usage metadata (for compaction tests)
-
-Each entry in `outputs` may be a `(payload, usage_dict)` tuple to inject token-usage metadata. This lets you test threshold-based auto-compaction without a real model:
+A `(entry, usage)` tuple attaches token usage to any entry, which is enough to drive threshold-based compaction:
 
 ```jac
 import from jaclang.byllm.lib { MockLLM, MockToolCall }
@@ -2162,11 +2118,9 @@ glob llm = MockLLM(
 def task(goal: str) -> str by llm(tools=[step_a]);
 ```
 
-A usage tuple works with any entry. Without one, the call is recorded with empty usage, as a provider that sends none would be.
+#### Malformed output and errors
 
-#### Simulating malformed output and errors
-
-To test what happens when the model gets the format wrong, send the text verbatim with `MockRawResponse`: malformed JSON raises `OutputConversionError` and triggers [typed-output retry](#typed-output-retry), exactly as a real model's reply would. `MockError(error=...)` raises from the provider: timeouts, connection errors and 5xx responses are retried as they are in production, and anything else propagates.
+`MockRawResponse` sends text verbatim, so malformed JSON goes through [typed-output retry](#typed-output-retry) exactly as a real model's reply would. `MockError` raises from the provider: timeouts, connection errors and 5xx responses are retried as in production, and anything else propagates.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM, MockRawResponse }
@@ -2194,7 +2148,7 @@ test "malformed output is retried and recovered" {
 }
 ```
 
-To cap or disable retries in a test, pass `max_output_retries` on the by-expression, e.g. `by llm(max_output_retries=1)` (a bare `by llm()` resets call params, so set it there rather than on the constructor).
+In a test, set the retry count on the call, `by llm(max_output_retries=1)`: a bare `by llm()` resets call params, so a value set on the constructor does not survive.
 
 ---
 
