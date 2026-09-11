@@ -1542,11 +1542,13 @@ impl BaseLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None]
     params.pop("api_key", None);
     attempt = 0;
     usage_base = len(mt_run._usage_history);
+    stream_model: str = self.model_name;
     while True {
         finish_reason = "";
         try {
             response = self.model_call_with_stream(params);
             for chunk in response {
+                stream_model = chunk?.model or stream_model;
                 if chunk?.choices and chunk?.choices?[0]?.finish_reason {
                     finish_reason = str(chunk?.choices?[0]?.finish_reason);
                 }
@@ -1572,6 +1574,10 @@ impl BaseLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None]
             }
             raise;
         }
+    }
+
+    if len(mt_run._usage_history) == usage_base {
+        _record_usage(mt_run, {}, stream_model, finish_reason=finish_reason);
     }
 }
 
@@ -1768,11 +1774,13 @@ impl BaseLLM.adispatch_streaming(mt_run: MTRuntime) -> AsyncIterator[str] {
     params.pop("api_key", None);
     attempt = 0;
     usage_base = len(mt_run._usage_history);
+    stream_model: str = self.model_name;
     while True {
         finish_reason = "";
         try {
             response = await self.model_call_with_stream_async(params);
             async for chunk in response {
+                stream_model = chunk?.model or stream_model;
                 if chunk?.choices and chunk?.choices?[0]?.finish_reason {
                     finish_reason = str(chunk?.choices?[0]?.finish_reason);
                 }
@@ -1798,6 +1806,10 @@ impl BaseLLM.adispatch_streaming(mt_run: MTRuntime) -> AsyncIterator[str] {
             }
             raise;
         }
+    }
+
+    if len(mt_run._usage_history) == usage_base {
+        _record_usage(mt_run, {}, stream_model, finish_reason=finish_reason);
     }
 }
 
