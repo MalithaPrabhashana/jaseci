@@ -132,12 +132,9 @@ def assert_written_back(label: str, history: list, answer: str) {
 }
 
 
-def _stream_replies -> list {
-    return [
-        call("get_weather", {"city": "Paris"}),
-        finish("Paris is sunny."),
-        say("Paris is sunny right now.")
-    ];
+"""One streamed turn: a tool call, the finish call, then the answer."""
+def _stream_replies(answer: str = "Paris is sunny right now.") -> list {
+    return [call("get_weather", {"city": "Paris"}), finish(answer), say(answer)];
 }
 
 
@@ -160,13 +157,19 @@ test "a streamed answer is written back as dicts, whatever the history was seede
 
 test "a second streamed turn grows the same history and keeps the first answer" {
     history: list = [];
-    llm = FakeLLM(replies=_stream_replies() + _stream_replies());
+    # Distinct answers per turn: identical ones would let the second overwrite
+    # the first with both assertions below still passing.
+    llm = FakeLLM(
+        replies=_stream_replies("Paris is sunny right now.")
+            + _stream_replies("Paris is still sunny.")
+    );
 
     first = stream_turn(llm, history, "How is Paris?");
     assert_written_back("turn 1", history, first);
     after_first = len(history);
 
     second = stream_turn(llm, history, "Still sunny?");
+    assert second != first , f"the two turns must differ, both gave {first!r}";
     assert len(history) > after_first , (
         f"history did not grow: was {after_first}, now {len(history)}"
     );

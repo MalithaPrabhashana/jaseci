@@ -63,7 +63,9 @@ test "the deprecated method= parameter still runs and warns once" {
         for x in w
         if issubclass(x.category, DeprecationWarning)
     ];
-    assert len(deprecations) >= 1 , "expected a DeprecationWarning for method=";
+    assert len(deprecations) == 1 , (
+        f"expected exactly one DeprecationWarning for method=, got {len(deprecations)}"
+    );
     assert "'method' parameter is deprecated" in str(deprecations[0].message) , (
         f"got: {deprecations[0].message}"
     );
