@@ -255,7 +255,10 @@ test "every dispatch path reports the cost litellm computes for the call" {
 test "cost is omitted rather than guessed when it cannot be computed" {
     for (label, resp) in [
         ("unpriceable model", _response(model=UNPRICEABLE)),
-        ("model litellm cannot map to a provider", _response(model="acme-internal-llm")),
+        (
+            "model litellm cannot map to a provider",
+            _response(model="acme-internal-llm")
+        ),
         ("response with no usage data", _response(usage={}))
     ] {
         printed = io.StringIO();
