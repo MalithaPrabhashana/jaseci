@@ -2062,7 +2062,7 @@ def get_product(prompt: str) -> Product by llm(stream=True);
 
 ## Testing with MockLLM
 
-Use `MockLLM` for deterministic testing without API calls. Mock responses are returned sequentially from the `outputs` list:
+`MockLLM` stands in for the model provider, so tests run without API keys. Only the network call is replaced: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer. Outputs are consumed in order, one per model call:
 
 ```jac
 import from jaclang.byllm.lib { MockLLM }
@@ -2088,11 +2088,63 @@ test "summarize returns second mock" {
 }
 ```
 
+Every request is recorded, so a test can check what byLLM sent as well as what came back. `llm.seen` holds each request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), `llm.seen_prompts` the prompt text of each call, and `llm.exhausted()` whether every output was used:
+
+```jac
+import from jaclang.byllm.lib { MockLLM }
+
+test "the input reaches the model" {
+    mock = MockLLM(model_name="mockllm", config={"outputs": ["Bonjour"]});
+    def greet(text: str) -> str by mock();
+    assert greet("Hello") == "Bonjour";
+    assert "Hello" in str(mock.sent("messages")[0]);
+    assert mock.exhausted();
+}
+```
+
 `MockLLM` is useful for:
 
 - Unit testing LLM-powered functions without API costs
-- Deterministic assertions on function behavior
+- Deterministic assertions on function behavior and on the request it makes
 - CI/CD pipelines where API keys aren't available
+
+#### What each output becomes
+
+| Entry in `outputs` | What the model sends |
+|---|---|
+| a string | that text; for a non-`str` return it is parsed like real model text |
+| any other value: a number, an enum member, an object, a list | that value as the typed answer, encoded the way a model sends it (enums by value) |
+| `MockToolCall(tool=fn, args={...})` | a tool call; `tool` is the function or its name, resolved against the tools the call offers, as for a real model |
+| a list of `MockToolCall` | several tool calls in one turn |
+| `MockRawResponse(content=..., tool_calls=[...], usage=..., finish_reason=...)` | one full turn as the provider sends it; `content` alone is delivered verbatim |
+| `MockError(error=..., content="", after=0)` | the provider raising `error`; on a stream, `content` arrives first and the error fires after `after` chunks |
+| `(entry, usage_dict)` | the entry, with token usage attached |
+
+For a typed return, queue the value itself:
+
+```jac
+import from jaclang.byllm.lib { MockLLM }
+
+enum Priority { LOW = "low", HIGH = "high" }
+
+obj Task {
+    has title: str,
+        priority: Priority;
+}
+
+glob llm = MockLLM(
+    model_name="mockllm",
+    config={"outputs": [Priority.HIGH, [Task(title="Fix login", priority=Priority.HIGH)]]}
+);
+
+def triage(ticket: str) -> Priority by llm();
+def plan(goal: str) -> list[Task] by llm();
+
+test "typed outputs round-trip through the parser" {
+    assert triage("Login is down") == Priority.HIGH;
+    assert plan("Ship it")[0].title == "Fix login";
+}
+```
 
 #### Injecting usage metadata (for compaction tests)
 
@@ -2102,7 +2154,6 @@ Each entry in `outputs` may be a `(payload, usage_dict)` tuple to inject token-u
 import from jaclang.byllm.lib { MockLLM, MockToolCall }
 
 def step_a -> str { return "a"; }
-def finish_tool(final_output: str) -> str { return final_output; }
 
 glob llm = MockLLM(
     model_name="mockllm",
@@ -2110,21 +2161,19 @@ glob llm = MockLLM(
     config={"outputs": [
         # (tool_call, usage) - triggers compaction at 85 % of 1000 tokens
         (MockToolCall(tool=step_a, args={}), {"prompt_tokens": 850, "total_tokens": 950}),
-        # plain entry - no usage injection, loop exits via finish_tool
-        MockToolCall(tool=finish_tool, args={"final_output": "done"})
+        # plain entry - the loop exits through byLLM's finish tool
+        MockToolCall(tool="finish_tool", args={"final_output": "done"})
     ]}
 );
+
+def task(goal: str) -> str by llm(tools=[step_a]);
 ```
 
-Non-tuple entries behave exactly as before - usage defaults to `{}`.
+A usage tuple works with any entry. Without one, the call is recorded with empty usage, as a provider that sends none would be.
 
-#### Simulating raw model text and errors
+#### Simulating malformed output and errors
 
-A plain string or a pre-built typed instance in `outputs` is returned verbatim, which is fine for happy-path tests but skips byLLM's parsing. To exercise the real parse and retry path (for example to test [typed-output retry](#typed-output-retry)), use these wrappers:
-
-- **`MockRawResponse(content=...)`** routes the text through `parse_response` exactly like a real model: valid JSON parses to the typed object, malformed JSON raises `OutputConversionError` (triggering a retry), and an empty string is returned as-is.
-- **`MockError(error=...)`** raises the wrapped exception when dispatched, to verify that errors which are not `OutputConversionError` propagate without retry.
-- **`MockLLM.seen_prompts`** records the prompt (joined message contents) seen on each dispatch, so a test can assert how many attempts ran and inspect the corrective feedback between them.
+To test what happens when the model gets the format wrong, send the text verbatim with `MockRawResponse`: malformed JSON raises `OutputConversionError` and triggers [typed-output retry](#typed-output-retry), exactly as a real model's reply would. `MockError(error=...)` raises from the provider: timeouts, connection errors and 5xx responses are retried as they are in production, and anything else propagates.
 
 ```jac
 import from jaclang.byllm.lib { MockLLM, MockRawResponse }

@@ -180,13 +180,16 @@ obj BaseLLM {
 }
 
 obj MockLLM(BaseLLM) {
-    has seen_prompts: list = [];
+    has seen_prompts: list = [],
+        seen: list = [],
+        chunk_size: int = 12;
 
     def postinit -> None;
-    override def dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult;
-    override async def adispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult;
-    override def dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None];
-    override async def adispatch_streaming(mt_run: MTRuntime);
+    override def model_call_no_stream(params: dict) -> object;
+    override def model_call_with_stream(params: dict) -> Generator[object, None, None];
+    def sent(key: str) -> list;
+    def exhausted -> bool;
+    def _next_reply(params: dict) -> MockRawResponse | MockError;
 }
 
 obj LocalLLM(BaseLLM) {
