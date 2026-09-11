@@ -37,6 +37,16 @@ test "a string answers a str call, and every request is recorded" {
         assert "Ada" in m.seen_prompts[0];
         assert m.exhausted();
     }
+
+    # Two mocks never share a queue or a record, even when one is built bare.
+    first = MockLLM(outputs=["a", "b"]);
+    def once(q: str) -> str by first();
+    once("x");
+    second = MockLLM();
+    assert second.outputs == [] and second.seen == [] , (
+        f"a fresh mock must start empty, got {second.outputs} / {second.seen}"
+    );
+    assert first.outputs == ["b"] , f"the first mock keeps its own queue, got {first.outputs}";
 }
 
 
@@ -104,35 +114,60 @@ test "a tool call resolves by name against the tools the call offers" {
             );
         }
     }
+
+    # A direct conversion keeps the id, so its tool result answers the same call.
+    def lookup(q: str) -> str {
+        return q;
+    }
+    tc = MockToolCall(tool=lookup, args={"q": "x"}, call_id="call_7").to_tool_call();
+    assert tc.call_id == "call_7" , f"got {tc.call_id!r}";
+    assert tc().tool_call_id == "call_7" , "the tool result must answer the same call";
 }
 
 
 test "a streamed answer arrives in chunks, with queued usage attached" {
-    m = MockLLM(
-        outputs=[
-            (
-                "Paris is sunny right now.",
-                {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
-            )
-        ]
-    );
-    def ask(q: str) -> str by m(stream=True, logging=True);
+    # A provider's usage can carry more than the three counters; the extra
+    # fields must not turn the (text, usage) pair into a typed answer.
+    for (label, queued_usage, expect_cached) in [
+        (
+            "token counters",
+            {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            0
+        ),
+        (
+            "richer provider usage",
+            {
+                "prompt_tokens": 7,
+                "completion_tokens": 3,
+                "total_tokens": 10,
+                "cache_read_input_tokens": 4,
+                "prompt_tokens_details": {"cached_tokens": 4},
+                "cost": 0.5
+            },
+            4
+        )
+    ] {
+        m = MockLLM(outputs=[("Paris is sunny right now.", queued_usage)]);
+        def ask(q: str) -> str by m(stream=True, logging=True);
 
-    events = list(ask("weather"));
-    chunks = [
-        e
-        for e in events
-        if isinstance(e, StreamEvent) and e.event_type == "chunk"
-    ];
-    usage = [
-        e
-        for e in events
-        if isinstance(e, StreamEvent) and e.event_type == "usage"
-    ];
-    assert len(chunks) > 1 , f"expected several chunks, got {len(chunks)}";
-    assert "".join([str(c.data.get("content", "")) for c in chunks])
-        == "Paris is sunny right now.";
-    assert usage and usage[-1].data["total"]["total_tokens"] == 10 , f"got {usage}";
+        events = list(ask("weather"));
+        chunks = [
+            e
+            for e in events
+            if isinstance(e, StreamEvent) and e.event_type == "chunk"
+        ];
+        usage = [
+            e
+            for e in events
+            if isinstance(e, StreamEvent) and e.event_type == "usage"
+        ];
+        assert len(chunks) > 1 , f"{label}: expected several chunks, got {len(chunks)}";
+        assert "".join([str(c.data.get("content", "")) for c in chunks])
+            == "Paris is sunny right now." , f"{label}: the text must arrive as text";
+        total = usage[-1].data["total"] if usage else {};
+        assert total.get("total_tokens") == 10 , f"{label}: got {total}";
+        assert total.get("cache_read_input_tokens") == expect_cached , f"{label}: got {total}";
+    }
 }
 
 
