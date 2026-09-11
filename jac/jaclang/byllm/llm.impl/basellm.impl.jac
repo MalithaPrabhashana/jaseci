@@ -273,13 +273,28 @@ def _apply_prompt_caching(messages: list[object], tools: list | None) {
 }
 
 
+def _quiet_lookup(lookup: Callable, fallback: any) -> any {
+    with _QUIET_LOOKUP_LOCK {
+        prev = getattr(litellm, "suppress_debug_info", False);
+        setattr(litellm, "suppress_debug_info", True);
+        try {
+            return lookup();
+        } except Exception {
+            return fallback;
+        } finally {
+            setattr(litellm, "suppress_debug_info", prev);
+        }
+    }
+}
+
+
 def _litellm_ctx_window(model_name: str) -> int {
-    try {
+    def lookup -> int {
         info = dict(litellm.get_model_info(model_name));
         return int(info.get("max_input_tokens") or info.get("max_tokens") or 0);
-    } except Exception {
-        return 0;
     }
+    window: int = _quiet_lookup(lookup, 0);
+    return window;
 }
 
 
@@ -312,8 +327,8 @@ def _attach_call_cost(
     if _existing_cost(usage_obj) is not None {
         return;
     }
-    try {
-        cost = litellm.completion_cost(
+    def lookup -> object {
+        return litellm.completion_cost(
             completion_response=(
                 response
                     if response is not None
@@ -321,7 +336,9 @@ def _attach_call_cost(
             ),
             model=model_name
         );
-    } except Exception {
+    }
+    cost = _quiet_lookup(lookup, None);
+    if cost is None {
         return;
     }
     if isinstance(usage_obj, dict) {
