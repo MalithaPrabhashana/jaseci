@@ -382,7 +382,9 @@ obj RoutingLLM(MockLLM) {
     def _queue_route(params: dict) {
         candidates = routing_candidates(params);
         if candidates {
-            self.outputs.insert(0, self.pick(candidates, str(params.get("messages"))));
+            self._current_queue().insert(
+                0, self.pick(candidates, str(params.get("messages")))
+            );
         }
     }
 }

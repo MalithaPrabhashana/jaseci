@@ -204,6 +204,24 @@ impl MockLLM.postinit -> None {
     } elif self.outputs {
         self.config["outputs"] = self.outputs;
     }
+    self._queue = self.outputs;
+}
+
+impl MockLLM._current_queue -> list {
+    configured = self.config.get("outputs");
+    if self.outputs is not self._queue {
+        queue = self.outputs;
+    } elif configured is not None and configured is not self._queue {
+        queue = configured;
+    } else {
+        queue = self.outputs;
+    }
+    self._queue = queue;
+    self.outputs = queue;
+    if configured is not None {
+        self.config["outputs"] = queue;
+    }
+    return queue;
 }
 
 impl MockLLM._next_reply(params: dict) -> MockRawResponse | MockError {
@@ -222,12 +240,13 @@ impl MockLLM._next_reply(params: dict) -> MockRawResponse | MockError {
     if bool(self.config.get("show_params", False)) {
         self.log_info(f"Mock LLM Call Parameters: {params}");
     }
-    if not self.outputs {
+    queue = self._current_queue();
+    if not queue {
         raise IndexError(
             f"MockLLM has no queued output left for call {len(self.seen)}"
         );
     }
-    return _mock_turn(self.outputs.pop(0));
+    return _mock_turn(queue.pop(0));
 }
 
 impl MockLLM.model_call_no_stream(params: dict) -> object {
@@ -264,5 +283,5 @@ impl MockLLM.sent(key: str) -> list {
 }
 
 impl MockLLM.exhausted -> bool {
-    return not self.outputs;
+    return not self._current_queue();
 }

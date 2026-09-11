@@ -47,6 +47,17 @@ test "a string answers a str call, and every request is recorded" {
         f"a fresh mock must start empty, got {second.outputs} / {second.seen}"
     );
     assert first.outputs == ["b"] , f"the first mock keeps its own queue, got {first.outputs}";
+
+    # Replacing the queue after construction works under either name, so code
+    # written before `outputs=` existed keeps working.
+    via_config = MockLLM(model_name="mockllm", config={"outputs": []});
+    via_config.config["outputs"] = ["from config"];
+    via_attr = MockLLM(outputs=["stale"]);
+    via_attr.outputs = ["from outputs"];
+    def ask_config(q: str) -> str by via_config();
+    def ask_attr(q: str) -> str by via_attr();
+    assert ask_config("x") == "from config";
+    assert ask_attr("x") == "from outputs";
 }
 
 
