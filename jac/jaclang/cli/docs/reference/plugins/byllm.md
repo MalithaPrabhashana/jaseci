@@ -2062,17 +2062,12 @@ def get_product(prompt: str) -> Product by llm(stream=True);
 
 ## Testing with MockLLM
 
-`MockLLM` stands in for the model provider, so tests run without API keys. Only the network call is replaced: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer. Outputs are consumed in order, one per model call:
+`MockLLM` stands in for the model provider, so tests run without API keys. Only the network call is replaced: byLLM still builds the real request and parses the reply, so a test catches a broken prompt, schema or parser as well as a changed answer. Outputs are consumed in order, one per model call. `model_name` defaults to `mockllm`, and the older `config={"outputs": [...]}` spelling still works:
 
 ```jac
 import from jaclang.byllm.lib { MockLLM }
 
-glob llm = MockLLM(
-    model_name="mockllm",
-    config={
-        "outputs": ["Mocked response 1", "Mocked response 2"]
-    }
-);
+glob llm = MockLLM(outputs=["Mocked response 1", "Mocked response 2"]);
 
 def translate(text: str) -> str by llm();
 def summarize(text: str) -> str by llm();
@@ -2094,7 +2089,7 @@ Every request is recorded, so a test can check what byLLM sent as well as what c
 import from jaclang.byllm.lib { MockLLM }
 
 test "the input reaches the model" {
-    mock = MockLLM(model_name="mockllm", config={"outputs": ["Bonjour"]});
+    mock = MockLLM(outputs=["Bonjour"]);
     def greet(text: str) -> str by mock();
     assert greet("Hello") == "Bonjour";
     assert "Hello" in str(mock.sent("messages")[0]);
@@ -2133,8 +2128,7 @@ obj Task {
 }
 
 glob llm = MockLLM(
-    model_name="mockllm",
-    config={"outputs": [Priority.HIGH, [Task(title="Fix login", priority=Priority.HIGH)]]}
+    outputs=[Priority.HIGH, [Task(title="Fix login", priority=Priority.HIGH)]]
 );
 
 def triage(ticket: str) -> Priority by llm();
@@ -2156,14 +2150,13 @@ import from jaclang.byllm.lib { MockLLM, MockToolCall }
 def step_a -> str { return "a"; }
 
 glob llm = MockLLM(
-    model_name="mockllm",
     ctx_window=1000,
-    config={"outputs": [
+    outputs=[
         # (tool_call, usage) - triggers compaction at 85 % of 1000 tokens
         (MockToolCall(tool=step_a, args={}), {"prompt_tokens": 850, "total_tokens": 950}),
         # plain entry - the loop exits through byLLM's finish tool
         MockToolCall(tool="finish_tool", args={"final_output": "done"})
-    ]}
+    ]
 );
 
 def task(goal: str) -> str by llm(tools=[step_a]);
@@ -2185,11 +2178,10 @@ obj Person {
 
 # First response is malformed JSON (triggers a retry); the second parses cleanly.
 glob llm = MockLLM(
-    model_name="mockllm",
-    config={"outputs": [
+    outputs=[
         MockRawResponse(content="{\"name\": \"Ada\", \"age\":"),
         MockRawResponse(content="{\"name\": \"Ada\", \"age\": 36}")
-    ]}
+    ]
 );
 
 def get_person -> Person by llm();

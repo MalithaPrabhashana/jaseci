@@ -6,7 +6,7 @@ plumbing are filtered out on the way; a real tool result is not.
 
 import from jaclang.byllm.types { Message, MessageRole }
 import from jaclang.byllm.lib { MockLLM }
-import from support_tests { mock_llm, call, finish, say }
+import from support_tests { call, finish, say }
 
 
 def get_weather(city: str) -> str {
@@ -26,8 +26,8 @@ def by_role(history: list, role: str) -> list {
 
 """One conversation carried across two turns, sharing the caller's list."""
 def ask_twice(history: list) -> tuple {
-    llm = mock_llm(
-        [
+    llm = MockLLM(
+        outputs=[
             call("get_weather", {"city": "Paris"}),
             finish("Paris is sunny."),
             finish("Yes, still sunny in Paris.")
@@ -148,7 +148,7 @@ test "a streamed answer is written back as dicts, whatever the history was seede
         ("Message", [Message(role=MessageRole.USER, content="PRIOR_MESSAGE")])
     ] {
         history = list(seed);
-        llm = mock_llm(_stream_replies());
+        llm = MockLLM(outputs=_stream_replies());
         answer = stream_turn(llm, history, "How is Paris?");
         assert answer , f"{label}: the stream produced nothing";
         assert_written_back(label, history, answer);
@@ -160,8 +160,8 @@ test "a second streamed turn grows the same history and keeps the first answer" 
     history: list = [];
     # Distinct answers per turn: identical ones would let the second overwrite
     # the first with both assertions below still passing.
-    llm = mock_llm(
-        _stream_replies("Paris is sunny right now.")
+    llm = MockLLM(
+        outputs=_stream_replies("Paris is sunny right now.")
             + _stream_replies("Paris is still sunny.")
     );
 

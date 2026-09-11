@@ -97,7 +97,7 @@ Runs without API keys - mock outputs are consumed sequentially, one per model ca
 ```jac
 import from jaclang.byllm.lib { MockLLM }
 
-glob llm = MockLLM(model_name="mockllm", config={"outputs": ["Bonjour", "Salut"]});
+glob llm = MockLLM(outputs=["Bonjour", "Salut"]);
 
 def translate(text: str) -> str by llm();
 

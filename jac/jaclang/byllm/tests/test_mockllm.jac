@@ -23,25 +23,25 @@ obj Person {
 enum Mood { HAPPY = "happy", SAD = "sad" }
 
 
-def mock(outputs: list) -> MockLLM {
-    return MockLLM(model_name="mockllm", config={"outputs": outputs});
-}
-
-
 test "a string answers a str call, and every request is recorded" {
-    m = mock(["Hello Ada"]);
-    def greet(name: str) -> str by m();
+    # outputs= and the older config={"outputs": ...} build the same queue.
+    for m in [
+        MockLLM(outputs=["Hello Ada"]),
+        MockLLM(model_name="mockllm", config={"outputs": ["Hello Ada"]})
+    ] {
+        def greet(name: str) -> str by m();
 
-    assert greet("Ada") == "Hello Ada";
-    assert len(m.seen) == 1;
-    assert "Ada" in str(m.sent("messages")[0]) , "the request must be the one byLLM built";
-    assert "Ada" in m.seen_prompts[0];
-    assert m.exhausted();
+        assert greet("Ada") == "Hello Ada";
+        assert len(m.seen) == 1;
+        assert "Ada" in str(m.sent("messages")[0]) , "the request must be the one byLLM built";
+        assert "Ada" in m.seen_prompts[0];
+        assert m.exhausted();
+    }
 }
 
 
 test "typed values round-trip through the real parser" {
-    m = mock([Person(name="Ada", age=36), 36, Mood.SAD, [1, 2]]);
+    m = MockLLM(outputs=[Person(name="Ada", age=36), 36, Mood.SAD, [1, 2]]);
     def who -> Person by m();
     def age -> int by m();
     def mood -> Mood by m();
@@ -57,7 +57,7 @@ test "typed values round-trip through the real parser" {
 
 
 test "a bare string for a typed return is parsed like model text, not trusted" {
-    m = mock(["36"]);
+    m = MockLLM(outputs=["36"]);
     def age -> int by m();
     raised = False;
     try {
@@ -88,8 +88,8 @@ test "a tool call resolves by name against the tools the call offers" {
             if queued == "add"
             else ("add" if queued == "add-by-name" else secret);
         args = {} if queued == "secret" else {"a": 2, "b": 3};
-        m = mock(
-            [
+        m = MockLLM(
+            outputs=[
                 MockToolCall(tool=tool, args=args),
                 MockToolCall(tool="finish_tool", args={"final_output": "done"})
             ]
@@ -108,8 +108,8 @@ test "a tool call resolves by name against the tools the call offers" {
 
 
 test "a streamed answer arrives in chunks, with queued usage attached" {
-    m = mock(
-        [
+    m = MockLLM(
+        outputs=[
             (
                 "Paris is sunny right now.",
                 {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
@@ -141,7 +141,7 @@ test "a queued error is raised, and an empty queue says which call ran out" {
         ("queued error", [MockError(error=RuntimeError("boom"))], RuntimeError, "boom"),
         ("empty queue", [], IndexError, "no queued output left for call 1")
     ] {
-        m = mock(outputs);
+        m = MockLLM(outputs=outputs);
         def ask(q: str) -> str by m();
         message = "";
         try {
@@ -155,8 +155,12 @@ test "a queued error is raised, and an empty queue says which call ran out" {
 
 
 test "MockRawResponse sends model text verbatim into the parser" {
-    m = mock(
-        [MockRawResponse(content='{"schema_object_wrapper": {"name": "Bo", "age": 4}}')]
+    m = MockLLM(
+        outputs=[
+            MockRawResponse(
+                content='{"schema_object_wrapper": {"name": "Bo", "age": 4}}'
+            )
+        ]
     );
     def who -> Person by m();
     p = who();

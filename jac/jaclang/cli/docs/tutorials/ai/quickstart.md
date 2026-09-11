@@ -346,12 +346,7 @@ Use MockLLM for deterministic tests:
 ```jac
 import from jaclang.byllm.lib { MockLLM }
 
-glob llm = MockLLM(
-    model_name="mockllm",
-    config={
-        "outputs": ["Mocked response 1", "Mocked response 2"]
-    }
-);
+glob llm = MockLLM(outputs=["Mocked response 1", "Mocked response 2"]);
 
 def translate(text: str) -> str by llm();
 
