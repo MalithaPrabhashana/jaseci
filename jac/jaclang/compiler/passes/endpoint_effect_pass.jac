@@ -192,20 +192,8 @@ walker EndpointEffectPass(UniPass) {
     def _call_target_symbol(call: FuncCall) -> (Symbol | None) {
         if isinstance(call.target, Name) {
             sym = call.target.sym;
-            if not sym {
-                try {
-                    tab = call.target.sym_tab;
-                    sym = tab.lookup(call.target.sym_name, deep=True);
-                } except ValueError as err {
-                    import sys;
-                    sys.stderr.write(
-                        f"[diag-9119] {err}: call target '{call.target.sym_name}' at {call.loc.mod_path}:{getattr(
-                            call.loc, 'first_line', '?'
-                        )} while scanning {getattr(self.ir_in.loc, 'mod_path', '?')}\n"
-                    );
-                    sys.stderr.flush();
-                    return None;
-                }
+            if not sym and call.target.sym_tab {
+                sym = call.target.sym_tab.lookup(call.target.sym_name, deep=True);
             }
             return sym;
         }
