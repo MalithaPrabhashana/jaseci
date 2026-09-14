@@ -186,7 +186,7 @@ obj BaseLLM {
 }
 
 obj MockLLM(BaseLLM) {
-    has model_name: str = MODEL_MOCK,
+    has model_name: str = "mockllm",
         outputs: list = [],
         seen_prompts: list = [],
         seen: list = [],
