@@ -204,8 +204,15 @@ def _check_file_job(request: dict[(str, any)]) -> dict[(str, any)] {
         result['success'] = len(result['errors']) == 0;
         return result;
     } except Exception as e {
+        import sys;
+        import traceback;
+        trace = traceback.format_exc();
+        sys.stderr.write(f"[diag-9119] worker traceback for {file_path}:\n{trace}\n");
+        sys.stderr.flush();
         result['errors'] = [
-            _message_diag(f"Error checking '{file_path}': {e}", file_path)
+            _message_diag(
+                f"Error checking '{file_path}': {e}\n[diag-9119]\n{trace}", file_path
+            )
         ];
         result['success'] = False;
         return result;
@@ -424,6 +431,13 @@ impl check(
                 };
             }
             res['label'] = unit['label'];
+            if not res.get('success') {
+                import sys;
+                for diag in res.get('errors') or [] {
+                    sys.stderr.write(f"[diag-9119] {path}: {diag.get('text')}\n");
+                }
+                sys.stderr.flush();
+            }
             res['_unit'] = unit;
             results.append(res);
             print_file_progress(
