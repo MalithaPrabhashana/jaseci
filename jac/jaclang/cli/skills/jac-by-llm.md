@@ -95,7 +95,7 @@ def stream_story(topic: str) -> str by llm(stream=True);
 No API keys needed. `MockLLM` replaces only the network call, so byLLM still builds the real request and parses the reply.
 
 - Outputs are consumed in order, one per model call; a tool loop takes one per step.
-- For a typed return, queue the value (`Priority.HIGH`, `[Task(...)]`). A bare string is parsed like model text.
+- For a typed return, queue the value (`Priority.HIGH`, `[Task(...)]`). A bare string is the answer when the return type allows a string (a union with `str`, a string enum), otherwise it is parsed like model text.
 - `MockToolCall(tool=fn_or_name, args={...})` must name a tool the function offers.
 - Assert on what was sent with `llm.sent("messages")` or `llm.sent("tools")`.
 

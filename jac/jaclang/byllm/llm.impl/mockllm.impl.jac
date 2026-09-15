@@ -43,7 +43,26 @@ def _mock_jsonable(value: object) -> object {
 }
 
 
-def _mock_turn(output: object) -> MockRawResponse | MockError {
+def _mock_takes_string(response_format: object) -> bool {
+    if not isinstance(response_format, dict) {
+        return False;
+    }
+    spec = response_format.get("json_schema");
+    schema = spec.get("schema") if isinstance(spec, dict) else None;
+    props = schema.get("properties") if isinstance(schema, dict) else None;
+    answer = props.get("schema_object_wrapper") if isinstance(props, dict) else None;
+    if not isinstance(answer, dict) {
+        return False;
+    }
+    options = answer.get("anyOf");
+    choices: list = options if isinstance(options, list) else [answer];
+    return any(isinstance(c, dict) and c.get("type") == "string" for c in choices);
+}
+
+
+def _mock_turn(
+    output: object, text_is_value: bool = False
+) -> MockRawResponse | MockError {
     counters = ("prompt_tokens", "completion_tokens", "total_tokens");
     usage: dict | None = None;
     if isinstance(output, tuple)
@@ -76,7 +95,10 @@ def _mock_turn(output: object) -> MockRawResponse | MockError {
         return MockRawResponse(tool_calls=list(output), usage=usage);
     }
     if isinstance(output, str) {
-        return MockRawResponse(content=output, usage=usage);
+        content = json.dumps({"schema_object_wrapper": output})
+            if text_is_value
+            else output;
+        return MockRawResponse(content=content, usage=usage);
     }
     return MockRawResponse(
         content=json.dumps({"schema_object_wrapper": _mock_jsonable(output)}),
@@ -246,7 +268,7 @@ impl MockLLM._next_reply(params: dict) -> MockRawResponse | MockError {
             f"MockLLM has no queued output left for call {len(self.seen)}"
         );
     }
-    return _mock_turn(queue.pop(0));
+    return _mock_turn(queue.pop(0), _mock_takes_string(params.get("response_format")));
 }
 
 impl MockLLM.model_call_no_stream(params: dict) -> object {

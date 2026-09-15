@@ -22,6 +22,14 @@ obj Person {
 
 enum Mood { HAPPY = "happy", SAD = "sad" }
 
+enum Level { LOW = 1, HIGH = 2 }
+
+obj Team {
+    has lead: Person,
+        crew: dict[str, list[Person]],
+        nick: str | None = None;
+}
+
 
 test "a string answers a str call, and every request is recorded" {
     # outputs= and the older config={"outputs": ...} build the same queue.
@@ -62,31 +70,83 @@ test "a string answers a str call, and every request is recorded" {
 
 
 test "typed values round-trip through the real parser" {
-    m = MockLLM(outputs=[Person(name="Ada", age=36), 36, Mood.SAD, [1, 2]]);
-    def who -> Person by m();
-    def age -> int by m();
-    def mood -> Mood by m();
-    def pair -> list[int] by m();
+    import from pydantic { TypeAdapter }
+    ada = Person(name="Ada", age=36);
+    team = Team(lead=ada, crew={"ops": [ada, Person(name="Bo", age=4)]}, nick="core");
 
-    p = who();
-    assert isinstance(p, Person) and p.name == "Ada" and p.age == 36 , f"got {p!r}";
-    assert m.sent("response_format")[0] is not None , "a typed call must request a schema";
-    assert age() == 36;
-    assert mood() == Mood.SAD , "an enum travels by value and comes back as the member";
-    assert pair() == [1, 2];
+    m_who = MockLLM(outputs=[ada]);
+    m_age = MockLLM(outputs=[36]);
+    m_ratio = MockLLM(outputs=[2.5]);
+    m_flag = MockLLM(outputs=[True]);
+    m_nothing = MockLLM(outputs=[None]);
+    m_mood = MockLLM(outputs=[Mood.SAD]);
+    m_level = MockLLM(outputs=[Level.HIGH]);
+    m_pair = MockLLM(outputs=[[1, 2]]);
+    m_moods = MockLLM(outputs=[[Mood.HAPPY, Mood.SAD]]);
+    m_counts = MockLLM(outputs=[{"a": 1, "b": 2}]);
+    m_team = MockLLM(outputs=[team]);
+    m_union_int = MockLLM(outputs=[7]);
+    # A string is a valid answer for these three return types, so it is the value.
+    m_union_str = MockLLM(outputs=["x"]);
+    m_optional_str = MockLLM(outputs=["hi"]);
+    m_enum_text = MockLLM(outputs=["sad"]);
+
+    def who -> Person by m_who();
+    def age -> int by m_age();
+    def ratio -> float by m_ratio();
+    def flag -> bool by m_flag();
+    def nothing -> int | None by m_nothing();
+    def mood -> Mood by m_mood();
+    def level -> Level by m_level();
+    def pair -> list[int] by m_pair();
+    def moods -> list[Mood] by m_moods();
+    def counts -> dict[str, int] by m_counts();
+    def crew -> Team by m_team();
+    def union_int -> int | str by m_union_int();
+    def union_str -> int | str by m_union_str();
+    def optional_str -> str | None by m_optional_str();
+    def enum_text -> Mood by m_enum_text();
+
+    for (label, call, want, ty) in [
+        ("obj", who, ada, Person),
+        ("int", age, 36, int),
+        ("float", ratio, 2.5, float),
+        ("bool", flag, True, bool),
+        ("None for an optional", nothing, None, int | None),
+        ("str enum member", mood, Mood.SAD, Mood),
+        ("int enum member", level, Level.HIGH, Level),
+        ("list", pair, [1, 2], list[int]),
+        ("list of enums", moods, [Mood.HAPPY, Mood.SAD], list[Mood]),
+        ("dict", counts, {"a": 1, "b": 2}, dict[str, int]),
+        ("obj holding a dict of obj lists and an optional", crew, team, Team),
+        ("int for int | str", union_int, 7, int | str),
+        ("str for int | str", union_str, "x", int | str),
+        ("str for str | None", optional_str, "hi", str | None),
+        ("enum value as a string", enum_text, Mood.SAD, Mood)
+    ] {
+        got = call();
+        adapter = TypeAdapter(ty);
+        assert adapter.dump_python(got, mode="json")
+            == adapter.dump_python(want, mode="json") , f"{label}: got {got!r}";
+    }
+    assert m_who.sent("response_format")[0] is not None , "a typed call must request a schema";
 }
 
 
-test "a bare string for a typed return is parsed like model text, not trusted" {
-    m = MockLLM(outputs=["36"]);
-    def age -> int by m();
-    raised = False;
-    try {
-        age();
-    } except (OutputConversionError, IndexError) {
-        raised = True;
+test "a bare string for a typed return that cannot be a string is parsed like model text" {
+    m_int = MockLLM(outputs=["36"]);
+    m_optional_int = MockLLM(outputs=["x"]);
+    def age -> int by m_int();
+    def maybe_age -> int | None by m_optional_int();
+    for (label, call) in [("int", age), ("int | None", maybe_age)] {
+        raised = False;
+        try {
+            call();
+        } except (OutputConversionError, IndexError) {
+            raised = True;
+        }
+        assert raised , f"{label}: a string is not a valid answer, so it must fail as model text";
     }
-    assert raised , "'36' is not the envelope a real model sends for an int";
 }
 
 

@@ -2088,7 +2088,7 @@ Outputs are consumed in order, one per model call, so a tool loop takes one per 
 
 | Entry in `outputs` | What the model sends |
 |---|---|
-| a string | that text; for a non-`str` return it is parsed like real model text |
+| a string | that text; for a non-`str` return it is the answer when the return type allows a string (a union with `str`, an optional `str`, a string enum), otherwise it is parsed like real model text |
 | any other value: a number, an enum member, an object, a list | that value as the typed answer, encoded the way a model sends it (enums by value) |
 | `MockToolCall(tool=fn, args={...})` | a tool call; `tool` is the function or its name, resolved against the tools the call offers, as for a real model |
 | a list of `MockToolCall` | several tool calls in one turn |
