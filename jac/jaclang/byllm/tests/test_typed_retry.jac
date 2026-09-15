@@ -10,7 +10,7 @@ import os;
 import from pathlib { Path }
 import from jaclang.byllm.config_loader { get_byllm_config, reset_byllm_config }
 import from jaclang.byllm.lib { MockLLM }
-import from support_tests { fail, prompt_text, say }
+import from support { fail, prompt_text, say }
 
 glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures");
 

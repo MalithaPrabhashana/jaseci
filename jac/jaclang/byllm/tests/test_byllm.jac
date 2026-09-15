@@ -23,7 +23,7 @@ import from jaclang.byllm.mcp { McpClient, McpTool }
 import from jaclang.byllm.types { Tool, Message, MessageRole }
 import from jaclang { JacRuntimeInterface as Jac }
 import from jaclang.byllm.lib { MockLLM }
-import from support_tests {
+import from support {
     scripted,
     finish,
     mk_run,
