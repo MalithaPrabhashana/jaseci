@@ -7,6 +7,7 @@ import os;
 import from jaclang.byllm.lib { Image, Video }
 import from jaclang.byllm.lib { MockLLM }
 import from support {
+    FIXTURE_DIR,
     prompt_text,
     data_url,
     media_blocks,
@@ -15,8 +16,6 @@ import from support {
     say,
     user_blocks
 }
-
-glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures");
 
 
 enum Personality { INTROVERT = "Introvert", EXTROVERT = "Extrovert" }
