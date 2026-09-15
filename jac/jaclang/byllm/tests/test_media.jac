@@ -6,7 +6,7 @@ Assert on the message blocks byLLM actually sent, not on a rendered string.
 import os;
 import from jaclang.byllm.lib { Image, Video }
 import from jaclang.byllm.lib { MockLLM }
-import from support_tests {
+import from support {
     prompt_text,
     data_url,
     media_blocks,
