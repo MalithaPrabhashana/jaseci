@@ -570,14 +570,16 @@ impl TypeEvaluator._get_type_of_expression_core(
                 }
 
                 if seeded_param {
-                    seed_body_expr: Expr | None = None;
+                    seed_body_node: UniNode | None = None;
                     if isinstance(expr.body, Expr) {
-                        seed_body_expr = expr.body;
+                        seed_body_node = expr.body;
+                    } elif isinstance(expr.body, list) and len(expr.body) == 1 {
+                        seed_body_node = expr.body[0];
                     } else {
-                        seed_body_expr = expr.tail_return_expr();
+                        seed_body_node = expr.tail_return_expr();
                     }
-                    if seed_body_expr is not None {
-                        self._invalidate_expr_type_cache(seed_body_expr);
+                    if seed_body_node is not None {
+                        self._invalidate_expr_type_cache(seed_body_node);
                     }
                 }
             }
@@ -596,6 +598,21 @@ impl TypeEvaluator._get_type_of_expression_core(
                 }
             } elif isinstance(return_type, UnknownType) {
                 return_type = self._infer_lambda_block_return_type(expr.body);
+            } elif (tail_expr := expr.tail_return_expr()) is not None {
+                tail_type = self.get_type_of_expression(
+                    tail_expr, expected_type=return_type
+                );
+                verdict = self.assign_expr(
+                    tail_expr, tail_type, return_type, strict=self._is_strict_site(expr)
+                );
+                if not verdict.ok and not verdict.diagnosed {
+                    self.emit_diag(
+                        E1002,
+                        tail_expr,
+                        actual=str(tail_type),
+                        expected=str(return_type)
+                    );
+                }
             }
             return FunctionType(
                 func_name="<lambda>", return_type=return_type, parameters=parameters,
