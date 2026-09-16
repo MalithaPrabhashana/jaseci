@@ -1,4 +1,4 @@
-"""A `by llm()` function in a submodule whose name ends in 'a'."""
+"""A `by llm()` function imported from another module; the module name ends in 'a'."""
 
 import from jaclang.byllm.lib { MockLLM }
 
