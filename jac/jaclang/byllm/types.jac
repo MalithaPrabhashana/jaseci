@@ -102,7 +102,7 @@ obj MockError {
     has error: Exception,
         content: str = "",
         after: int = 0,
-        reply: MockRawResponse | None = None;
+        reply: object = None;
 }
 
 obj CompletionResult {

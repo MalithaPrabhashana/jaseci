@@ -23,6 +23,7 @@ import from jaclang.runtime.semantic {
     FunctionInfo,
     MethodInfo,
     ParamInfo,
+    fetch_mtir,
     mk_dict,
     mk_list,
 }
@@ -477,7 +478,7 @@ test "scope name generation algorithm" {
 
 test "imported function scope resolution" {
     need_outside_jaclang(fixture_path("importer_main.jac"));
-    load_fixture("importer_main");
+    importer = load_fixture("importer_main");
 
     assert JacRuntime.program is not None;
     mtir_map = JacRuntime.program.mtir_map;
@@ -492,6 +493,11 @@ test "imported function scope resolution" {
     assert any("importable_schema" in scope for scope in scopes) , (
         f"the scope must keep the whole module name 'importable_schema' (ending in 'a'), "
         f"not a truncated one; got {scopes}"
+    );
+    # The call site finds the entry the compiler registered, through the importer.
+    found = fetch_mtir(importer.get_imported_data);
+    assert found is not None and any(found is mtir_map[s] for s in scopes) , (
+        f"fetch_mtir missed the registered entry; scopes: {scopes}"
     );
 }
 
@@ -810,7 +816,7 @@ test "submodule MTIR keyed by import fullname" {
         sys.modules.pop(name, None);
     }
 
-    load_fixture("scope_main");
+    main = load_fixture("scope_main");
 
     assert JacRuntime.program is not None;
     mtir_map = JacRuntime.program.mtir_map;
@@ -821,6 +827,15 @@ test "submodule MTIR keyed by import fullname" {
     assert "scope_dir.module_beta.process_data" in mtir_map , f"Expected fullname-keyed MTIR entry for module_beta. Keys: {list(
         mtir_map.keys()
     )}";
+    # The call sites look up the same keys at runtime, through the aliases.
+    for (alias, key) in [
+        ("alpha_process", "scope_dir.module_alpha.process_data"),
+        ("beta_process", "scope_dir.module_beta.process_data")
+    ] {
+        assert fetch_mtir(getattr(main, alias)) is mtir_map[key] , (
+            f"fetch_mtir({alias}) did not return the entry at {key}"
+        );
+    }
 }
 
 test "runtime scope resolution matches compile time" {

@@ -2082,7 +2082,7 @@ test "outputs come back typed, and the request is recorded" {
 }
 ```
 
-Outputs are consumed in order, one per model call, so a tool loop takes one per step. `llm.seen` holds every request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), and `llm.seen_prompts` the prompt text of each call. `model_name` defaults to `mockllm`, and `config={"outputs": [...]}` still works in place of `outputs=`. A stream is split into `chunk_size` characters (12 by default), and `logging_obj=` is carried on every stream, as litellm's own stream wrapper carries one.
+Outputs are consumed in order, one per model call, so a tool loop takes one per step. `llm.seen` holds every request, `llm.sent(key)` one field across them (`"messages"`, `"tools"`, `"response_format"`), and `llm.seen_prompts` the prompt text of each call. `model_name` defaults to `mockllm`, and `config={"outputs": [...]}` still works in place of `outputs=`. A stream sends text, and each tool call's arguments, in pieces of `chunk_size` characters (12 by default). `logging_obj=` is attached to the stream `model_call_with_stream` returns, as litellm attaches its own.
 
 #### What each output becomes
 
@@ -2093,7 +2093,7 @@ Outputs are consumed in order, one per model call, so a tool loop takes one per 
 | `MockToolCall(tool=fn, args={...})` | a tool call; `tool` is the function or its name, resolved against the tools the call offers, as for a real model |
 | a list of `MockToolCall` | several tool calls in one turn |
 | `MockRawResponse(content=..., tool_calls=[...], usage=..., finish_reason=..., model=..., unnamed_fragments=False)` | one full turn as the provider sends it; `content` alone is delivered verbatim; `model` names the model that answered, as after a fallback; `unnamed_fragments=True` streams tool-call arguments with no id or name |
-| `MockError(error=..., content="", after=0, reply=None)` | the provider raising `error`; on a stream, `content` arrives first and the error fires after `after` chunks, or `reply` streams in full (or its first `after` chunks) before the error |
+| `MockError(error=..., content="", after=0, reply=None)` | the provider raising `error`; on a stream, the first `after` chunks of `content` arrive before it (`after=0` sends none), or else the whole `reply`, which is any other output in this table and does not combine with `content` or `after` |
 | `(entry, usage_dict)` | the entry, with token usage attached |
 
 #### Token usage (for compaction tests)

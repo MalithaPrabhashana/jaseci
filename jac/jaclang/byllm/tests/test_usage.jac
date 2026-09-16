@@ -689,17 +689,10 @@ test "usage_step fires once per underlying call, scoped to that call's own usage
 
     def task(q: str) -> str by llm(tools=[step_a], stream=True, logging=True);
 
-    usage_steps: list[any] = [];
-    final_usage: dict[str, any] | None = None;
     events = list(task("go"));
-    for event in events {
-        if event.event_type == "usage_step" {
-            usage_steps.append(event.data);
-        }
-        if event.event_type == "usage" {
-            final_usage = event.data;
-        }
-    }
+    usage_steps = [e.data for e in events_of(events, "usage_step")];
+    finals = [e.data for e in events_of(events, "usage")];
+    final_usage: dict[str, any] | None = finals[-1] if finals else None;
 
     assert len(usage_steps) == 3 , (
         f"expected one usage_step per underlying call, got {len(usage_steps)}"
@@ -818,12 +811,12 @@ test "usage_step fires for the recovery call" {
         e.data for e in events_of(list(llm._invoke_streaming(mt_run)), "usage_step")
     ];
     assert llm.exhausted() , f"recovery never ran: {llm.outputs}";
-    assert steps , "the recovery episode reported no usage_step";
-    kinds = [c["call_kind"] for c in steps[-1]["per_call"]];
+    assert len(steps) == 1 , f"the recovery episode must report one usage_step: {steps}";
+    kinds = [c["call_kind"] for c in steps[0]["per_call"]];
     assert kinds == ["recovery", "final_answer_restream"] , (
-        f"the last usage_step must cover the recovery call, got call_kinds={kinds}"
+        f"the usage_step must cover the recovery call, got call_kinds={kinds}"
     );
-    assert steps[-1]["total"]["total_tokens"] == 48;
+    assert steps[0]["total"]["total_tokens"] == 48;
 }
 
 
@@ -901,8 +894,8 @@ test "on_iteration's IterationContext exposes real cumulative total_cost" {
     assert ctx.total_tokens == 110 , (
         f"total_tokens should reflect the real first call, got {ctx.total_tokens}"
     );
-    # MockLLM never attaches a cost, so 0.0 is the honest expectation here;
-    # the summation itself is exercised with real costs elsewhere above.
+    # MockLLM's default model name has no price, so 0.0 is the honest expectation
+    # here; the summation itself is exercised with real costs elsewhere above.
     assert ctx.total_cost == 0.0 , (
         f"total_cost should reflect real recorded cost (none here), got {ctx.total_cost}"
     );
@@ -922,13 +915,7 @@ test "llm_timing no longer duplicates token counts now that usage_step exists" {
 
     def task(q: str) -> str by llm(tools=[step_a], stream=True, logging=True);
 
-    timing_events: list[any] = [];
-    events = list(task("go"));
-    for event in events {
-        if event.event_type == "llm_timing" {
-            timing_events.append(event.data);
-        }
-    }
+    timing_events = [e.data for e in events_of(list(task("go")), "llm_timing")];
 
     assert len(timing_events) == 1;
     assert set(timing_events[0].keys()) == {"duration_ms", "iteration"} , (

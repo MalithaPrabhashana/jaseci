@@ -43,7 +43,8 @@ Once they run out the model answers "all done".
     enabled        False means the caller never opts in, i.e. the shipped default
     bounds         stands in for `[byllm.tool_stream]`, so a run never depends on
                    the jac.toml of whoever is running the suite
-    raises         the error the run must end in; any other error surfaces
+    resp_type      the run's return type; anything but `str` lets byLLM recover
+                   a reply that fails conversion
     probe          receives the run's MTRuntime as probe["mt"]
 """
 def _run(
@@ -52,13 +53,14 @@ def _run(
     enabled: bool = True,
     bounds: dict[str, any] | None = None,
     chunk_size: int = 12,
-    raises: type | None = None,
+    resp_type: type = str,
     probe: dict[str, any] | None = None
 ) -> list[any] {
     llm = MockLLM(
         model_name="gpt-4o", outputs=replies + [say("all done")], chunk_size=chunk_size
     );
     mt = mk_run(
+        resp_type=resp_type,
         tools=tools,
         stream=True,
         call_params=({"stream_tool_args": True} if enabled else {})
@@ -76,20 +78,10 @@ def _run(
 
     events: list[any] = [];
     with mock.patch.object(cfg, "get_tool_stream_config", _tool_stream_cfg) {
-        try {
-            for ev in llm._invoke_streaming(mt) {
-                events.append(ev);
-            }
-        } except Exception as err {
-            if raises is None or not isinstance(err, raises) {
-                raise err;
-            }
-            return events;
+        for ev in llm._invoke_streaming(mt) {
+            events.append(ev);
         }
     }
-    assert raises is None , (
-        f"the run should have ended in {raises}: {event_types(events)}"
-    );
     return events;
 }
 
@@ -266,7 +258,8 @@ test "an abandoned stream is always announced alongside its deltas" {
         message="too long", model="gpt-4o", llm_provider="openai"
     );
     # Same staleness class, different handler: the response fails conversion
-    # after deltas are already on screen, and that call will never run.
+    # after deltas are already on screen, that call never runs, and byLLM
+    # recovers with one more (non-streamed) call that answers directly.
     unconvertible = OutputConversionError("could not convert");
 
     # reset_first: a retry announces BEFORE the replacement's deltas; compaction
@@ -278,7 +271,7 @@ test "an abandoned stream is always announced alongside its deltas" {
             [fail(_dropped()), call("write_file", BODY, call_id="c1")],
             [write_file],
             12,
-            None,
+            str,
             True
         ),
         (
@@ -289,7 +282,7 @@ test "an abandoned stream is always announced alongside its deltas" {
             ],
             [read_file],
             4,
-            None,
+            str,
             True
         ),
         (
@@ -297,24 +290,25 @@ test "an abandoned stream is always announced alongside its deltas" {
             [fail(overflow, reply=call("write_file", big, call_id="c1"))],
             [write_file],
             12,
-            None,
+            str,
             False
         ),
         (
             "conversion",
-            [fail(unconvertible, reply=call("write_file", big, call_id="c1"))],
+            [fail(unconvertible, reply=call("write_file", big, call_id="c1")), 7],
             [write_file],
             12,
-            OutputConversionError,
+            int,
             False
         )
     ];
 
-    for (label, replies, tools, size, raises, reset_first) in cases {
+    for (label, replies, tools, size, resp_type, reset_first) in cases {
         seen: dict[str, any] = {};
-        events = _run(replies, tools, chunk_size=size, raises=raises, probe=seen);
+        events = _run(replies, tools, chunk_size=size, resp_type=resp_type, probe=seen);
         kinds = event_types(events);
 
+        assert "steps_done" in kinds , f"[{label}] the run never finished: {kinds}";
         assert "tool_call_delta" in kinds , f"[{label}] no deltas to reason about: {kinds}";
         assert "stream_reset" in kinds , f"[{label}] the abandoned stream was never announced: {kinds}";
         if reset_first {

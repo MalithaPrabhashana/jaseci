@@ -17,19 +17,24 @@ JAC_TEST_STRICT=1 jac test jac/jaclang/byllm/tests \
 # One file, or one test in it.
 JAC_TEST_STRICT=1 jac test jac/jaclang/byllm/tests/test_usage.jac -t "usage_step fires for the recovery call"
 
-# The MTIR file, from a copy outside the checkout, as the sealed lane runs it.
-cp -r jac/jaclang/byllm/tests /tmp/byllm-tests
+# The MTIR file, from a fresh copy outside the checkout, as the sealed lane runs it.
+rm -rf /tmp/byllm-tests && cp -r jac/jaclang/byllm/tests /tmp/byllm-tests
 JAC_TEST_STRICT=1 jac test /tmp/byllm-tests/test_mtir_integration.jac
 ```
 
-`JAC_TEST_STRICT=1` fails a file whose optional dependency is missing instead of skipping
-it; CI always sets it.
+`JAC_TEST_STRICT=1` turns a skip into a failure, so a lane that should run everything
+cannot pass by skipping. CI sets it on the byllm lane and the sealed MTIR step.
 
-`test_mtir_integration.jac` runs in place too, but three of its tests skip there. A file
-inside the jaclang package compiles into the compiler's own program, so the MTIR a
-fixture registers never reaches `JacRuntime.program`, which is what those tests read.
-`need_outside_jaclang()` asks the compiler where a fixture goes and skips when it is the
-compiler's own program.
+| Guard | Without strict | With strict |
+|---|---|---|
+| a missing dependency at import, `require_module("PIL")` | skips | fails |
+| `need_outside_jaclang(path)` | skips | fails |
+| `need("cv2", "OpenCV")`, for a dependency CI does not install | skips | skips |
+
+`test_mtir_integration.jac` runs in place too, without strict, and three of its tests
+skip there. A file inside the jaclang package compiles into the compiler's own program,
+so the MTIR a fixture registers never reaches `JacRuntime.program`, which is what those
+tests read. `need_outside_jaclang()` asks the compiler where a fixture goes.
 
 ## What is fake and what is real
 
@@ -66,7 +71,8 @@ assert "lookup" in tool_names(llm.seen[0]);
 | `call(name, args, call_id=, usage=)` | calls one tool; `args` is a dict or a JSON string |
 | `calls([(name, args, id), ...])` | calls several tools in one turn |
 | `finish(output, usage=)` | calls `finish_tool` with `output` |
-| `fail(error, content=, after=, reply=)` | raises `error`; a stream delivers `content`, or the whole `reply`, first |
+| `fail(error, content=, after=)` | raises `error`; a stream first sends the first `after` chunks of `content` (`after=0` sends none) |
+| `fail(error, reply=entry)` | raises `error`; a stream first sends the whole `entry`, any row of this table but `fail` |
 | `(entry, {"prompt_tokens": ...})` | answers with `entry` and reports that usage |
 
 What a provider reports about a reply, and a real model class:
@@ -92,7 +98,8 @@ What a provider reports about a reply, and a real model class:
 | the routing candidates offered | `routing_candidates(params)` |
 | the events of a `logging=True` stream | `stream_events(stream)`, `events_of(events, kind)`, `event_types(events)` |
 | the answer text of a stream | `chunk_text(events)` |
-| what byLLM logged | `with capture_logs() as logs`, `with capture_loguru() as logs`, then `logs.text()` |
+| what byLLM logged through loguru: `llm.jac` and its impls, `visit_routing.jac` | `with capture_loguru() as logs`, then `logs.text()` |
+| what it logged through `logging`: `types`, `mcp`, `parallel`, `telemetry`, `model_cache` | `with capture_logs(name=) as logs`, then `logs.text()` |
 | every queued reply was used | `llm.exhausted()` |
 
 Lower level:
@@ -101,7 +108,7 @@ Lower level:
 |---|---|
 | an `MTRuntime` to hand a dispatch method directly | `mk_run(resp_type=, tools=, stream=, call_params=, messages=, finish=)` |
 | one litellm text chunk | `text_chunk(text)` |
-| skip when an optional dependency is missing | `need("PIL", "Pillow")` |
+| skip when a dependency is missing; see the guard table above | `require_module(...)` from `jaclang.testing.requires`, or `need(...)` |
 
 ## Fixtures
 
@@ -113,7 +120,8 @@ so it compiles and runs on its own. It has no `with entry`, no `print` and no `a
 |---|---|---|
 | program | `basic.jac`, `scope_dir/module_alpha.jac`, `enum_no_value.jac` | `load_fixture(name)`, or `JacProgram().compile(fixture_path(file))` |
 | graph | `routing_graph.jac`, `agent_graph.jac` | a static `import from fixtures.routing_graph { ... }` |
-| config | `compaction_config/`, `jac_toml_gemini/`, `system_prompt_override/` | `get_byllm_config(Path(fixture_path(dir)))` |
+| config | `compaction_config/`, `jac_toml_gemini/` | `get_byllm_config(Path(fixture_path(dir)))` |
+| project, a module beside its own `jac.toml` | `system_prompt_override/` | `Jac.jac_import(name, base_path=fixture_path(dir))` |
 | media | `image.jpg`, `SampleVideo_1280x720_2mb.mp4` | `Image(fixture_path(file))` |
 
 ## Rules
@@ -126,6 +134,10 @@ test is about.
 **Assert on what reached the model or what came back.** Read `llm.sent(...)`, the return
 value, the events or the captured log. Never scrape stdout; the one exception is a test
 whose subject is that byLLM prints nothing.
+
+**Pair a negative assert with a positive one.** `secret not in logs.text()` also passes when
+the capture saw nothing, such as `capture_logs()` around a loguru message. First assert
+that the same capture holds something the call does log.
 
 **A test that calls a fixture function binds its own model.** A fixture's model gives
 fixed answers, and `load_fixture()` returns a cached module, so every test that loads it

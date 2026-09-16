@@ -230,7 +230,7 @@ import from pathlib { Path }
 import from jaclang.byllm.config_loader { get_byllm_config, reset_byllm_config }
 import from jaclang.runtime.runtime { JacRuntime }
 
-glob GEMINI_FIXTURE = os.path.join(FIXTURE_DIR, "jac_toml_gemini");
+glob GEMINI_FIXTURE = fixture_path("jac_toml_gemini");
 
 
 test "byllm config reads model from jac.toml" {
@@ -949,9 +949,7 @@ test "async streaming stays lazy: the producer waits for the consumer" {
 # The by llm() declaration lives in a fixture: at module level here it perturbs
 # the two tests that compile a fixture with JacProgram().
 test "async def by llm(stream=True) streams end to end" {
-    code_gen = (prog := JacProgram()).compile(
-        os.path.join(FIXTURE_DIR, "async_stream_by_llm.jac")
-    );
+    code_gen = (prog := JacProgram()).compile(fixture_path("async_stream_by_llm.jac"));
     assert not prog.errors_had , f"Compilation errors: {prog.errors_had}";
     compiled = compile(code_gen.gen.py_ast[0], filename="<ast>", mode="exec");
     module = types.ModuleType("async_stream_by_llm_fixture");
@@ -1062,9 +1060,7 @@ import ast as ast3;
 import from jaclang.compiler.driver.program { JacProgram }
 
 test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
-    code_gen = (prog := JacProgram()).compile(
-        os.path.join(FIXTURE_DIR, "async_by_llm.jac")
-    );
+    code_gen = (prog := JacProgram()).compile(fixture_path("async_by_llm.jac"));
     assert not prog.errors_had , f"Compilation errors: {prog.errors_had}";
     assert code_gen.gen.py_ast and isinstance(code_gen.gen.py_ast[0], ast3.Module) , (
         "Expected a compiled Python AST module"
@@ -1120,9 +1116,7 @@ test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
 }
 
 test "an async by llm() call runs end to end through its model" {
-    code_gen = (prog := JacProgram()).compile(
-        os.path.join(FIXTURE_DIR, "async_by_llm.jac")
-    );
+    code_gen = (prog := JacProgram()).compile(fixture_path("async_by_llm.jac"));
     assert not prog.errors_had , f"Compilation errors: {prog.errors_had}";
     assert code_gen.gen.py_ast and isinstance(code_gen.gen.py_ast[0], ast3.Module);
 

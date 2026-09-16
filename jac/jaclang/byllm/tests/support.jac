@@ -19,7 +19,6 @@ The file is not collected as a suite: it has no `test_` prefix by design.
 
 import logging;
 import os;
-import from typing { Generator }
 import from unittest { mock }
 import from jaclang { JacRuntimeInterface as Jac }
 import from jaclang.byllm.llm { BaseLLM }
@@ -98,14 +97,15 @@ def finish(
 }
 
 
-"""Raise `error` instead of answering. On a stream, `content` is delivered first and
-the error fires after `after` of its chunks: `fail(err, content="partial", after=1)`.
-`reply` streams a whole turn first (or its first `after` chunks), such as a tool call."""
+"""Raise `error` instead of answering. On a stream, the error can follow a partial reply:
+
+    fail(err, content="partial", after=1)   the first `after` chunks of `content`
+    fail(err, reply=call("write_file", a))  the whole of `reply`, any queue entry
+
+`content` with `after=0` sends nothing. Without a stream the error is raised at once.
+"""
 def fail(
-    error: Exception,
-    content: str = "",
-    after: int = 0,
-    reply: MockRawResponse | None = None
+    error: Exception, content: str = "", after: int = 0, reply: object = None
 ) -> MockError {
     return MockError(error=error, content=content, after=after, reply=reply);
 }
@@ -352,9 +352,10 @@ def data_url(block: dict[str, any]) -> str {
 }
 
 
-"""Skip the calling test when an optional dependency is absent.
+"""Skip the calling test when `module` is absent, even under `JAC_TEST_STRICT`.
 
-    need("PIL", "Pillow");
+Only for a dependency CI does not install: `need("cv2", "OpenCV")`. For one it does,
+call `require_module` from `jaclang.testing.requires`, which fails under strict.
 """
 def need(module: str, package: str = "") {
     import importlib;
@@ -366,20 +367,27 @@ def need(module: str, package: str = "") {
 }
 
 
-"""Skip the calling test unless `path` compiles into the runtime's own program.
+"""Skip the calling test unless `path` compiles into the runtime's own program; fail
+instead under `JAC_TEST_STRICT`.
 
 A file inside the jaclang package compiles into the compiler's program instead, so the
 MTIR it registers never reaches `JacRuntime.program`. CI runs such tests from a copy.
 """
 def need_outside_jaclang(path: str) {
     import from jaclang.runtime.runtime { JacRuntime }
+    import from jaclang.testing.test_runner { strict_mode }
     program = JacRuntime.get_program();
-    if JacRuntime.get_selfhost().resolve(path, program) is not program {
-        testskip(
-            "this fixture compiles into the compiler's own program here; "
-            "run from a copy outside the jaclang tree, as CI does"
-        );
+    if JacRuntime.get_selfhost().resolve(path, program) is program {
+        return;
     }
+    reason = (
+        "this fixture compiles into the compiler's own program here; "
+        "run from a copy outside the jaclang tree, as CI does"
+    );
+    if strict_mode() {
+        raise AssertionError(f"{reason} (JAC_TEST_STRICT is set)");
+    }
+    testskip(reason);
 }
 
 
@@ -474,13 +482,9 @@ obj RoutingLLM(MockLLM) {
         return super.model_call_no_stream(params);
     }
 
-    override def model_call_with_stream(
-        params: dict[str, any]
-    ) -> Generator[object, None, None] {
+    override def model_call_with_stream(params: dict[str, any]) -> Iterable[object] {
         self._queue_route(params);
-        for chunk in super.model_call_with_stream(params) {
-            yield chunk;
-        }
+        return super.model_call_with_stream(params);
     }
 
     """Put this call's routing answer at the head of the queue. A prompt with no

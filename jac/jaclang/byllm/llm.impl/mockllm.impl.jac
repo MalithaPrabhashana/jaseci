@@ -73,7 +73,19 @@ def _mock_turn(
         output = output[0];
     }
     if isinstance(output, MockError) {
-        return output;
+        if output.reply is None {
+            return output;
+        }
+        if output.content or output.after {
+            raise ValueError(
+                "MockError takes content= with after=, or reply=, not both"
+            );
+        }
+        reply = _mock_turn(output.reply, text_is_value);
+        if not isinstance(reply, MockRawResponse) {
+            raise ValueError("MockError(reply=...) cannot be another MockError");
+        }
+        return MockError(error=output.error, reply=reply);
     }
     if isinstance(output, MockRawResponse) {
         if usage is None {
@@ -184,11 +196,15 @@ def _mock_chunk(
 
 
 obj _MockStream {
-    has chunks: Iterable[object],
+    has chunks: Iterator[object],
         logging_obj: object;
 
-    def __iter__ -> Iterator[object] {
-        return iter(self.chunks);
+    def __iter__ -> _MockStream {
+        return self;
+    }
+
+    def __next__ -> object {
+        return next(self.chunks);
     }
 }
 
@@ -311,13 +327,10 @@ impl MockLLM._stream_reply(params: dict[str, any]) -> Generator[object, None, No
     model = params.get("model") or self.model_name;
     if isinstance(turn, MockError) {
         partial: list[object] = [];
-        if turn.reply is not None {
+        if isinstance(turn.reply, MockRawResponse) {
             partial = _mock_chunks(
                 turn.reply, turn.reply.model or model, self.chunk_size
             );
-            if turn.after > 0 {
-                partial = partial[:turn.after];
-            }
         } elif turn.content {
             partial = _mock_chunks(
                 MockRawResponse(content=turn.content), model, self.chunk_size
