@@ -30,6 +30,7 @@ import from support {
     fixture_path,
     load_fixture,
     mk_run,
+    prompt_text,
     say,
     scripted,
     text_chunk,
@@ -1118,7 +1119,7 @@ test "async by llm() codegen emits await Jac.acall_llm not call_llm" {
     );
 }
 
-test "async by llm() end-to-end with mocked acall_llm" {
+test "an async by llm() call runs end to end through its model" {
     code_gen = (prog := JacProgram()).compile(
         os.path.join(FIXTURE_DIR, "async_by_llm.jac")
     );
@@ -1128,22 +1129,18 @@ test "async by llm() end-to-end with mocked acall_llm" {
     compiled = compile(code_gen.gen.py_ast[0], filename="<ast>", mode="exec");
     module = types.ModuleType("async_by_llm_fixture");
     module.__dict__["__file__"] = code_gen.loc.mod_path;
+    exec(compiled, module.__dict__);
+    llm = MockLLM(outputs=[say("summary")]);
+    module.__dict__["llm"] = llm;
 
     async def _run_end_to_end -> str {
-        async def _fake_acall_llm(**kwargs: object) -> any {
-            return "summary";
-        }
-
-        import jaclang.lib.jaclib as _jaclib;
-        with unittest.mock.patch.object(_jaclib, "acall_llm", _fake_acall_llm) {
-            exec(compiled, module.__dict__);
-            result = await module.__dict__["get_summary"](text="hello world");
-            return result;
-        }
+        return await module.__dict__["get_summary"](text="hello world");
     }
     result = asyncio.run(_run_end_to_end());
-    assert result == "summary" , (
-        f"Expected mocked acall_llm result 'summary', got: {result!r}"
+
+    assert result == "summary" , f"expected the queued answer, got {result!r}";
+    assert "hello world" in prompt_text(llm) , (
+        f"the argument must reach the model, got {prompt_text(llm)}"
     );
 }
 
