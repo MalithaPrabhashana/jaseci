@@ -7,18 +7,9 @@ display-only and opt-in; each test pins one invariant."""
 import litellm;
 import from unittest { mock }
 import jaclang.byllm.llm as _byllm_llm_mod;
-import from jaclang.byllm.lib { MockRawResponse, MockToolCall }
+import from jaclang.byllm.lib { MockLLM, MockRawResponse, MockToolCall }
 import from jaclang.byllm.exceptions { FinishToolError, OutputConversionError }
-import from support {
-    ProviderLLM,
-    call,
-    calls,
-    event_types,
-    events_of,
-    fail,
-    mk_run,
-    say
-}
+import from support { call, calls, event_types, events_of, fail, mk_run, say }
 
 glob SHIPPED_DEFAULTS: dict[str, any] = {
          "enabled": False,
@@ -52,8 +43,6 @@ Once they run out the model answers "all done".
     enabled        False means the caller never opts in, i.e. the shipped default
     bounds         stands in for `[byllm.tool_stream]`, so a run never depends on
                    the jac.toml of whoever is running the suite
-    breaks         call index -> error raised once that call's chunks are out
-    unnamed_args   tool-call fragments arrive with no id or name
     raises         the error the run must end in; any other error surfaces
     probe          receives the run's MTRuntime as probe["mt"]
 """
@@ -63,17 +52,11 @@ def _run(
     enabled: bool = True,
     bounds: dict[str, any] | None = None,
     chunk_size: int = 12,
-    breaks: dict[int, Exception] | None = None,
-    unnamed_args: bool = False,
     raises: type | None = None,
     probe: dict[str, any] | None = None
 ) -> list[any] {
-    llm = ProviderLLM(
-        model_name="gpt-4o",
-        outputs=replies + [say("all done")],
-        chunk_size=chunk_size,
-        breaks=breaks or {},
-        unnamed_args=unnamed_args
+    llm = MockLLM(
+        model_name="gpt-4o", outputs=replies + [say("all done")], chunk_size=chunk_size
     );
     mt = mk_run(
         tools=tools,
@@ -295,54 +278,41 @@ test "an abandoned stream is always announced alongside its deltas" {
             [fail(_dropped()), call("write_file", BODY, call_id="c1")],
             [write_file],
             12,
-            {},
-            False,
             None,
             True
         ),
         (
             "retry/flush",
-            [fail(_dropped()), call("read_file", short, call_id="c1")],
+            [
+                fail(_dropped()),
+                call("read_file", short, call_id="c1", unnamed_fragments=True)
+            ],
             [read_file],
             4,
-            {},
-            True,
             None,
             True
         ),
         (
             "compaction",
-            [call("write_file", big, call_id="c1")],
+            [fail(overflow, reply=call("write_file", big, call_id="c1"))],
             [write_file],
             12,
-            {0: overflow},
-            False,
             None,
             False
         ),
         (
             "conversion",
-            [call("write_file", big, call_id="c1")],
+            [fail(unconvertible, reply=call("write_file", big, call_id="c1"))],
             [write_file],
             12,
-            {0: unconvertible},
-            False,
             OutputConversionError,
             False
         )
     ];
 
-    for (label, replies, tools, size, breaks, unnamed, raises, reset_first) in cases {
+    for (label, replies, tools, size, raises, reset_first) in cases {
         seen: dict[str, any] = {};
-        events = _run(
-            replies,
-            tools,
-            chunk_size=size,
-            breaks=breaks,
-            unnamed_args=unnamed,
-            raises=raises,
-            probe=seen
-        );
+        events = _run(replies, tools, chunk_size=size, raises=raises, probe=seen);
         kinds = event_types(events);
 
         assert "tool_call_delta" in kinds , f"[{label}] no deltas to reason about: {kinds}";

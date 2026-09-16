@@ -62,22 +62,22 @@ assert "lookup" in tool_names(llm.seen[0]);
 | Queue entry | The model... |
 |---|---|
 | a value (`42`, `Person(...)`, `Level.HIGH`) | answers with that typed value |
-| `say(text, usage=, finish_reason=)` | answers with text; `finish_reason="length"` truncates it |
+| `say(text, usage=, finish_reason=, model=)` | answers with text; `finish_reason="length"` truncates it |
 | `call(name, args, call_id=, usage=)` | calls one tool; `args` is a dict or a JSON string |
 | `calls([(name, args, id), ...])` | calls several tools in one turn |
 | `finish(output, usage=)` | calls `finish_tool` with `output` |
-| `fail(error, content=, after=)` | raises `error`; a stream delivers `content` first |
+| `fail(error, content=, after=, reply=)` | raises `error`; a stream delivers `content`, or the whole `reply`, first |
 | `(entry, {"prompt_tokens": ...})` | answers with `entry` and reports that usage |
 
-When a queue cannot say it:
+What a provider reports about a reply, and a real model class:
 
 | Need | Use |
 |---|---|
+| the provider reports a different model than was asked for, as after a fallback | `say(..., model="...")`, `call(..., model="...")` |
+| a stream that drops after sending a reply | `fail(error, reply=call(...))` |
+| tool-call fragments with no id or name | `call(..., unnamed_fragments=True)` |
+| a stream carrying litellm's `logging_obj` | `MockLLM(logging_obj=...)` |
 | a real `Model` or `LocalLLM`, with its own request shaping | `with scripted(model, replies) { ... }` |
-| the model the provider reports differs from the one asked for | `ProviderLLM(served_as="...")` |
-| a stream carrying litellm's `logging_obj` | `ProviderLLM(logging_obj=...)` |
-| a stream that drops after its chunks | `ProviderLLM(breaks={call_index: error})` |
-| tool-call fragments with no id or name | `ProviderLLM(unnamed_args=True)` |
 | a routing prompt answered by reading its candidates | `RoutingLLM(pick=...)` |
 
 ## Reading what happened
@@ -119,7 +119,7 @@ so it compiles and runs on its own. It has no `with entry`, no `print` and no `a
 ## Rules
 
 **Fake the network, not byLLM.** Never patch `model_call_*`, `dispatch_*` or other
-byLLM internals to fake a reply; queue it on `MockLLM`, `scripted()` or `ProviderLLM`.
+byLLM internals to fake a reply; queue it on `MockLLM` or `scripted()`.
 Patch litellm itself (`litellm.completion`, a Router) only when that boundary is what the
 test is about.
 

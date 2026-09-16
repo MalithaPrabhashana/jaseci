@@ -8,10 +8,11 @@ builds the real request and parses the reply. The builders below script its turn
     assert task("x") == "done";
     assert llm.sent("tools")[0] is not None;
 
-A typed answer is queued as the value itself. For what a queue cannot say:
+A typed answer is queued as the value itself. A reply also carries what the provider
+reports about it: `say(..., model=...)` for the model that answered, and
+`fail(error, reply=...)` for a stream that drops after sending it. For a real `Model`:
 
-    scripted(model, replies)   a real `Model` answering from a queue
-    ProviderLLM(...)           a served model, a stream `logging_obj`, a dropped stream
+    with scripted(model, replies) { ... }
 
 The file is not collected as a suite: it has no `test_` prefix by design.
 """
@@ -34,11 +35,17 @@ glob FIXTURE_DIR: str = os.path.join(os.path.dirname(__file__), "fixtures"),
      };
 
 
-"""Model text; `finish_reason="length"` makes it a truncated turn."""
+"""Model text; `finish_reason="length"` makes it a truncated turn, and `model` names
+the model that answered."""
 def say(
-    content: str, usage: dict[str, any] | None = None, finish_reason: str = ""
+    content: str,
+    usage: dict[str, any] | None = None,
+    finish_reason: str = "",
+    model: str = ""
 ) -> MockRawResponse {
-    return MockRawResponse(content=content, usage=usage, finish_reason=finish_reason);
+    return MockRawResponse(
+        content=content, usage=usage, finish_reason=finish_reason, model=model
+    );
 }
 
 
@@ -48,19 +55,28 @@ def call(
     args: dict[str, any] | str | None = None,
     call_id: str = "",
     usage: dict[str, any] | None = None,
-    finish_reason: str = ""
+    finish_reason: str = "",
+    model: str = "",
+    unnamed_fragments: bool = False
 ) -> MockRawResponse {
     return calls(
         [(name, args if args is not None else {}, call_id)],
         usage=usage,
-        finish_reason=finish_reason
+        finish_reason=finish_reason,
+        model=model,
+        unnamed_fragments=unnamed_fragments
     );
 }
 
 
-"""Several tool calls in one turn; each entry is (name, args) or (name, args, id)."""
+"""Several tool calls in one turn; each entry is (name, args) or (name, args, id).
+`unnamed_fragments` streams their arguments with no id or name."""
 def calls(
-    entries: list[any], usage: dict[str, any] | None = None, finish_reason: str = ""
+    entries: list[any],
+    usage: dict[str, any] | None = None,
+    finish_reason: str = "",
+    model: str = "",
+    unnamed_fragments: bool = False
 ) -> MockRawResponse {
     return MockRawResponse(
         tool_calls=[
@@ -68,7 +84,9 @@ def calls(
             for e in entries
         ],
         usage=usage,
-        finish_reason=finish_reason
+        finish_reason=finish_reason,
+        model=model,
+        unnamed_fragments=unnamed_fragments
     );
 }
 
@@ -81,9 +99,15 @@ def finish(
 
 
 """Raise `error` instead of answering. On a stream, `content` is delivered first and
-the error fires after `after` of its chunks: `fail(err, content="partial", after=1)`."""
-def fail(error: Exception, content: str = "", after: int = 0) -> MockError {
-    return MockError(error=error, content=content, after=after);
+the error fires after `after` of its chunks: `fail(err, content="partial", after=1)`.
+`reply` streams a whole turn first (or its first `after` chunks), such as a tool call."""
+def fail(
+    error: Exception,
+    content: str = "",
+    after: int = 0,
+    reply: MockRawResponse | None = None
+) -> MockError {
+    return MockError(error=error, content=content, after=after, reply=reply);
 }
 
 
@@ -145,80 +169,6 @@ obj Scripted {
 
 def scripted(model: BaseLLM, replies: list[any], chunk_size: int = 12) -> Scripted {
     return Scripted(model=model, replies=replies, chunk_size=chunk_size);
-}
-
-
-"""Clear the id and name on a streamed chunk's tool-call fragments."""
-def _drop_call_names(chunk: any) {
-    for choice in chunk.choices {
-        for fragment in choice.delta.tool_calls or [] {
-            fragment.id = None;
-            fragment.function.name = None;
-        }
-    }
-}
-
-
-"""A stream carrying litellm's `logging_obj`, as its CustomStreamWrapper does."""
-obj LoggedStream {
-    has chunks: Iterable[object],
-        logging_obj: object;
-
-    def __iter__ -> Iterator[object] {
-        return iter(self.chunks);
-    }
-}
-
-
-"""A MockLLM for the provider details a reply queue cannot express.
-
-    served_as      the model the provider reports, as after a router fallback
-    logging_obj    carried on every stream, as litellm's CustomStreamWrapper does
-    breaks[n]      raised once call n's chunks are out: a stream dropped mid-reply
-    unnamed_args   streamed tool-call fragments carry arguments but no id or name
-"""
-obj ProviderLLM(MockLLM) {
-    has served_as: str = "",
-        logging_obj: object | None = None,
-        breaks: dict[int, Exception] = {},
-        unnamed_args: bool = False;
-
-    override def model_call_no_stream(params: dict[str, any]) -> object {
-        reply = super.model_call_no_stream(params);
-        if self.served_as {
-            setattr(reply, "model", self.served_as);
-        }
-        return reply;
-    }
-
-    override def model_call_with_stream(
-        params: dict[str, any]
-    ) -> Generator[object, None, None] {
-        stream = self._served_stream(params, len(self.seen));
-        if self.logging_obj is not None {
-            wrapped: any = LoggedStream(chunks=stream, logging_obj=self.logging_obj);
-            return wrapped;
-        }
-        return stream;
-    }
-
-    def _served_stream(
-        params: dict[str, any], call: int
-    ) -> Generator[object, None, None] {
-        for chunk in super.model_call_with_stream(params) {
-            if self.served_as {
-                setattr(chunk, "model", self.served_as);
-            }
-            if self.unnamed_args {
-                _drop_call_names(chunk);
-            }
-            yield chunk;
-        }
-        failure = self.breaks.get(call);
-        if failure is not None {
-            raise failure;
-        }
-    }
 }
 
 

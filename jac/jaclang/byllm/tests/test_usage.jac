@@ -18,16 +18,7 @@ import from jaclang.byllm.lib { Model, MockLLM }
 import from jaclang.byllm.mtir { MTRuntime }
 import from jaclang.byllm.types { MockToolCall, IterationContext }
 import from jaclang.byllm.telemetry { register_agent_callback, _agent_callbacks }
-import from support {
-    TOKENS,
-    ProviderLLM,
-    call,
-    events_of,
-    finish,
-    mk_run,
-    say,
-    scripted
-}
+import from support { TOKENS, call, events_of, finish, mk_run, say, scripted }
 
 glob MODEL = "gpt-4o-mini",
      UNPRICEABLE = "openai/ft:definitely-not-a-real-model:acme::zzz",
@@ -239,11 +230,10 @@ test "dispatch_streaming_with_tools forwards the stream's logging_obj and attrib
     # a logging_obj - byLLM's rebuild call must forward the one on the
     # CustomStreamWrapper, or every tools-loop call loses the native path.
     marker = object();
-    llm = ProviderLLM(
+    llm = MockLLM(
         model_name="requested-model",
-        served_as="actual-served-model",
         logging_obj=marker,
-        outputs=[say("hi", usage=TOKENS)]
+        outputs=[say("hi", usage=TOKENS, model="actual-served-model")]
     );
     # The spy rebuilds without the marker, which litellm would try to log through.
     real_builder = litellm.stream_chunk_builder;
@@ -374,10 +364,9 @@ test "a call reporting no measurable usage is still counted, not dropped" {
 test "streaming records attribute the actual serving model and carry finish_reason" {
     # As providers send it: finish_reason arrives before usage, which comes on a
     # trailing chunk with empty choices.
-    llm = ProviderLLM(
+    llm = MockLLM(
         model_name="requested-model",
-        served_as="actual-served-model",
-        outputs=[say("hi", usage=TOKENS)]
+        outputs=[say("hi", usage=TOKENS, model="actual-served-model")]
     );
     mt = mk_run(stream=True);
     list(llm.dispatch_streaming(mt));
