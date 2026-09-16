@@ -106,12 +106,12 @@ Lower level:
 ## Fixtures
 
 Everything under `fixtures/` is input, never a test. A `.jac` fixture declares the
-`by llm()` functions and types a test needs and nothing else: no model assignment, no
-`with entry`, no `print`, no `assert`.
+`by llm()` functions and types a test needs, together with the model they are bound to,
+so it compiles and runs on its own. It has no `with entry`, no `print` and no `assert`.
 
 | Kind | Examples | A test uses it by |
 |---|---|---|
-| program | `basic.jac`, `scope_main.jac`, `enum_no_value.jac` | `load_fixture(name)`, or `JacProgram().compile(fixture_path(file))` |
+| program | `basic.jac`, `scope_dir/module_alpha.jac`, `enum_no_value.jac` | `load_fixture(name)`, or `JacProgram().compile(fixture_path(file))` |
 | graph | `routing_graph.jac`, `agent_graph.jac` | a static `import from fixtures.routing_graph { ... }` |
 | config | `compaction_config/`, `jac_toml_gemini/`, `system_prompt_override/` | `get_byllm_config(Path(fixture_path(dir)))` |
 | media | `image.jpg`, `SampleVideo_1280x720_2mb.mp4` | `Image(fixture_path(file))` |
@@ -127,11 +127,12 @@ test is about.
 value, the events or the captured log. Never scrape stdout; the one exception is a test
 whose subject is that byLLM prints nothing.
 
-**Every test owns its fake.** `load_fixture()` returns a cached module, so a model a
-fixture holds is shared by every test that loads it.
+**A test that calls a fixture function binds its own model.** A fixture's model gives
+fixed answers, and `load_fixture()` returns a cached module, so every test that loads it
+would share them. Assign `module.llm` before calling.
 
-**A fixture's model global is `glob llm: any = None;`.** A test assigns its own model
-after import. Without `: any` the global infers `NoneType` and the assignment fails
+**A fixture with no model of its own declares `glob llm: any = None;`.** A test assigns
+its model after import. Without `: any` the global infers `NoneType` and the assignment fails
 `jac check`.
 
 **Graph fixtures are imported statically.** A module from `load_fixture()` is untyped, so

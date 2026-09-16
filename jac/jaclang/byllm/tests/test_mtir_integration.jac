@@ -476,8 +476,8 @@ test "scope name generation algorithm" {
 }
 
 test "imported function scope resolution" {
-    need_outside_jaclang(fixture_path("importer_main.jac"));
-    load_fixture("importer_main");
+    need_outside_jaclang(fixture_path("import_dir/importable_schema.jac"));
+    load_fixture("import_dir.importable_schema");
 
     assert JacRuntime.program is not None;
     mtir_map = JacRuntime.program.mtir_map;
@@ -755,8 +755,9 @@ test "enum in schema generation" {
 # Scope Resolution Consistency Tests (Runtime vs Compile-time)
 # =============================================================================
 test "same function name different files resolve distinctly" {
-    need_outside_jaclang(fixture_path("scope_main.jac"));
-    load_fixture("scope_main");
+    need_outside_jaclang(fixture_path("scope_dir/module_alpha.jac"));
+    load_fixture("scope_dir.module_alpha");
+    load_fixture("scope_dir.module_beta");
 
     assert JacRuntime.program is not None;
     mtir_map = JacRuntime.program.mtir_map;
@@ -799,18 +800,14 @@ test "same function name different files resolve distinctly" {
 }
 
 test "submodule MTIR keyed by import fullname" {
-    need_outside_jaclang(fixture_path("scope_main.jac"));
+    need_outside_jaclang(fixture_path("scope_dir/module_alpha.jac"));
     # Force re-execution so our exec_module rename fires against the fresh program.
-    for name in [
-        "scope_main",
-        "scope_dir.module_alpha",
-        "scope_dir.module_beta",
-        "scope_dir"
-    ] {
+    for name in ["scope_dir.module_alpha", "scope_dir.module_beta", "scope_dir"] {
         sys.modules.pop(name, None);
     }
 
-    load_fixture("scope_main");
+    load_fixture("scope_dir.module_alpha");
+    load_fixture("scope_dir.module_beta");
 
     assert JacRuntime.program is not None;
     mtir_map = JacRuntime.program.mtir_map;

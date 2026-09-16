@@ -1,5 +1,13 @@
+import from jaclang.byllm.lib { Model }
+
+glob llm = Model(model_name="gpt-4o-mini", config={"verbose": True});
+
 """Personality types for classification."""
-enum Personality { INTROVERT = 1, EXTROVERT = 2, AMBIVERT = 3 }
+enum Personality {
+    INTROVERT = 1,
+    EXTROVERT = 2,
+    AMBIVERT = 3
+}
 
 sem Personality.INTROVERT = "Person who is reserved, reflective, and prefers solitude.";
 

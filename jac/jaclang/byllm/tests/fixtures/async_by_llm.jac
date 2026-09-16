@@ -1,9 +1,11 @@
 """Async `by llm()` codegen: an async def must emit `await Jac.acall_llm(...)`.
 
-The test binds `llm` before calling.
+The test binds its own model before calling.
 """
 
-glob llm: any = None;
+import from jaclang.byllm.lib { Model }
+
+glob llm = Model(model_name="gpt-4o-mini");
 
 async def get_summary(text: str) -> str by llm();
 
