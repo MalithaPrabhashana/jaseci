@@ -3,8 +3,9 @@ finished answer: a cut-off tool call surfaces a max_tokens error instead of runn
 with partial arguments, and a reply with no text and no tool call raises
 OutputTruncatedError instead of returning an empty answer."""
 
+import asyncio;
 import from jaclang.byllm.lib { Model, OutputTruncatedError }
-import from support { call, say, scripted }
+import from support { call, finish, say, scripted }
 
 
 def save_data(name: str, payload: str) -> str {
@@ -12,28 +13,40 @@ def save_data(name: str, payload: str) -> str {
 }
 
 
-"""Run one scripted turn in `mode` and return (answer or raised error, conversation)."""
-def _turn(replies: list[any], mode: str) -> tuple[any, list[dict[str, any]]] {
+"""Run one scripted turn in `mode` and return (answer or raised error, conversation).
+`iters` caps the tool loop, so the next call is the forced final answer."""
+def _turn(
+    replies: list[any], mode: str, iters: int = 0
+) -> tuple[any, list[dict[str, any]]] {
     conv: list[dict[str, any]] = [];
     llm = Model(model_name="gpt-4o");
 
     def plain(task: str) -> str by llm(
-        tools=[save_data], conversation=conv, stream=False
+        tools=[save_data], conversation=conv, stream=False, max_react_iterations=iters
     );
 
     def streamed(task: str) -> str by llm(
-        tools=[save_data], conversation=conv, stream=True
+        tools=[save_data], conversation=conv, stream=True, max_react_iterations=iters
     );
 
     """Built the way a streaming agent is: tools, streamed, with logging."""
     def events(task: str) -> str by llm(
-        tools=[save_data], conversation=conv, stream=True, logging=True
+        tools=[save_data],
+        conversation=conv,
+        stream=True,
+        logging=True,
+        max_react_iterations=iters
     );
+
+    async def no_tools(task: str) -> str by llm(conversation=conv);
 
     with scripted(llm, replies) {
         try {
             if mode == "plain" {
                 return (plain("save a big payload"), conv);
+            }
+            if mode == "async" {
+                return (asyncio.run(no_tools("save a big payload")), conv);
             }
             text = "";
             for item in (streamed if mode == "streamed" else events)(
@@ -63,7 +76,8 @@ test "a reply cut off at max_tokens never passes as a finished answer" {
                 say("done")
             ],
             "answer": "done",
-            "tool_error": True
+            "tool_error": True,
+            "modes": ["plain", "streamed", "events"]
         },
         # The whole budget went to reasoning: no answer exists.
         {
@@ -71,6 +85,26 @@ test "a reply cut off at max_tokens never passes as a finished answer" {
             "replies": [say("", finish_reason="length")],
             "answer": OutputTruncatedError,
             "tool_error": False
+        },
+        # The answer is committed; only the streamed restatement of it is empty.
+        {
+            "case": "empty cut-off narration",
+            "replies": [finish("saved it"), say("", finish_reason="length")],
+            "answer": "saved it",
+            "tool_error": False,
+            "modes": ["plain", "streamed", "events"]
+        },
+        # The tool loop hit its cap and the forced final answer came back empty.
+        {
+            "case": "empty cut-off final answer",
+            "replies": [
+                call("save_data", {"name": "x", "payload": "y"}),
+                say("", finish_reason="length")
+            ],
+            "answer": OutputTruncatedError,
+            "tool_error": False,
+            "iters": 1,
+            "modes": ["plain", "streamed", "events"]
         },
         # Cut-off text is still the model's text.
         {
@@ -88,9 +122,10 @@ test "a reply cut off at max_tokens never passes as a finished answer" {
         }
     ];
     for row in rows {
-        for mode in ["plain", "streamed", "events"] {
-            (answer, conv) = _turn(row["replies"], mode);
+        for mode in row.get("modes", ["plain", "streamed", "events", "async"]) {
+            (answer, conv) = _turn(row["replies"], mode, row.get("iters", 0));
             where = row["case"] + " / " + mode;
+            assert conv , where + ": conversation was not written back";
             if row["answer"] is OutputTruncatedError {
                 assert isinstance(answer, OutputTruncatedError) , where
                     + ": got "
