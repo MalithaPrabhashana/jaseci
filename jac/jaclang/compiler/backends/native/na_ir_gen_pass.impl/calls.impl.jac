@@ -2406,11 +2406,7 @@ impl NaIRGenPass._codegen_call(nd: uni.FuncCall) -> (ir.Value | None) {
             }
             param_ir_types: list[ir.Type] = [];
             for p in sig.get_parameters() {
-                param_ir_types.append(
-                    self._resolve_jac_type(p.type_tag)
-                        if p.type_tag is not None
-                        else ir.IntType(64)
-                );
+                param_ir_types.append(self._resolve_jac_type(p));
             }
             ret_ir_type = self._resolve_jac_type(sig.return_type);
             _extern_sym = func_name;
@@ -3451,6 +3447,12 @@ impl NaIRGenPass._emit_isinstance_user(
         );
         eq = self.builder.icmp_unsigned("==", vptr, vt_base, name="isinst.eq");
         cmp = eq if cmp is None else self.builder.or_(cmp, eq, name="isinst.or");
+    }
+    if cmp is not None
+        and self._vtable_slot_certain(
+            self._flow_narrowed_type_of(nd.params[0] if nd.params else None)
+        ) {
+        cmp = self._isinstance_vtable_fallback(cmp, vptr, names, "isinst");
     }
 
     if self._is_owned(operand) {

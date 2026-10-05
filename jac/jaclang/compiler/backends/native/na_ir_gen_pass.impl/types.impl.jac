@@ -868,7 +868,11 @@ impl NaIRGenPass._lower_view_container(t: any) -> (ir.Type | None) {
 impl NaIRGenPass._lower_class_type(t: ClassType) -> (ir.Type | None) {
     cname = t.shared.class_name;
     if t.is_builtin("Node") or t.is_builtin("Edge") or t.is_builtin("Walker") {
-        return ir.IntType(8).as_pointer();
+        _any_ref = self.llvm_module.context.get_identified_type("OspAnyRef");
+        if _any_ref.is_opaque {
+            _any_ref.set_body(ir.IntType(8));
+        }
+        return _any_ref.as_pointer();
     }
     if cname in self.type_map {
         return self.type_map[cname];
@@ -1255,7 +1259,7 @@ impl NaIRGenPass._resolve_jac_type(type_expr: (uni.UniNode | None)) -> ir.Type {
         and type_expr.type_tag is not None {
         return self._resolve_jac_type(type_expr.type_tag.tag);
     }
-    return ir.IntType(64);
+    return self._emit_unlowerable_type(type_expr, _ptb);
 }
 
 impl NaIRGenPass._resolve_decl_type(
@@ -4120,6 +4124,19 @@ impl NaIRGenPass._emit_comparison(
     }
     left = self._str_view(left);
     right = self._str_view(right);
+
+    if op in (Tok.EE, Tok.NE)
+        and self._is_graph_type(key_ret)
+        and isinstance(left.type, ir.PointerType)
+        and isinstance(right.type, ir.PointerType) {
+        _gi8p = ir.IntType(8).as_pointer();
+        return self.builder.icmp_unsigned(
+            "==" if op == Tok.EE else "!=",
+            self.builder.bitcast(left, _gi8p, name="osp.id.l"),
+            self.builder.bitcast(right, _gi8p, name="osp.id.r"),
+            name="osp.id.eq"
+        );
+    }
     (left, right) = self._restore_erased_cmp_operands(left, right, key_ret);
     left_type = left.type;
     right_type = right.type;
@@ -4830,6 +4847,23 @@ impl NaIRGenPass._cmp_static_type(
     return _lt;
 }
 
+impl NaIRGenPass._is_graph_type(ty: (TypeBase | None)) -> bool {
+    import from jaclang.compiler.types.types { ClassType as _GtClassType }
+    if ty is None or not isinstance(ty, _GtClassType) {
+        return False;
+    }
+    import from jaclang.compiler.passes.layout_pass { class_type_native_name }
+    _tn = class_type_native_name(ty);
+    if _tn is None {
+        return False;
+    }
+    _lay = self._arch_layout(_tn);
+    if _lay is not None {
+        return _lay.is_osp;
+    }
+    return _tn in ("Node", "Edge", "Walker", "Root", "GenericEdge");
+}
+
 impl NaIRGenPass._restore_erased_cmp_operands(
     left: ir.Value, right: ir.Value, ty: (TypeBase | None)
 ) -> tuple[ir.Value, ir.Value] {
@@ -5462,6 +5496,17 @@ impl NaIRGenPass._sort_key_orderable(ty: (TypeBase | None)) -> (bool | None) {
         return False;
     }
     _args = ty.private.type_args or [];
+    if _name == "tuple" {
+        import from jaclang.compiler.types.types { UnknownType }
+        _known = [
+            a
+            for a in _args
+            if not isinstance(a, UnknownType)
+        ];
+        if _known and len(_known) < len(_args) {
+            _args = _known;
+        }
+    }
     if not _args {
         return None;
     }

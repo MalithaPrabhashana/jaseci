@@ -216,6 +216,7 @@ impl NaIRGenPass._codegen_destroy_target(target: uni.Expr, nd: uni.DeleteStmt) -
             _fa_argtys = _forget_all_fn.function_type.args;
             self.builder.call(_forget_all_fn, [self._coerce_type(_hs, _fa_argtys[0])]);
         }
+        self._osp_sync();
         self._release_owned_args([_val], op="del_stmt");
         return;
     }
@@ -231,6 +232,7 @@ impl NaIRGenPass._codegen_destroy_target(target: uni.Expr, nd: uni.DeleteStmt) -
         _f_argtys = _forget_fn.function_type.args;
         self.builder.call(_forget_fn, [self._coerce_type(_h, _f_argtys[0])]);
     }
+    self._osp_sync();
     self._release_owned_args([_val], op="del_stmt");
 }
 
@@ -424,6 +426,12 @@ impl NaIRGenPass._codegen_return(nd: uni.ReturnStmt) -> None {
     if nd.expr is not None {
         val = self._codegen_required(nd.expr);
         if val is not None {
+            if self._str_desc_ty is not None
+                and val.type == self._str_desc_ty
+                and func_ret_type != self._str_desc_ty
+                and not self._nogc_headerless() {
+                val = self._str_materialize(val);
+            }
             val = self._coerce_type(val, func_ret_type);
             _ret_root_local = False;
             if isinstance(nd.expr, uni.AtomTrailer)
@@ -1394,6 +1402,11 @@ impl NaIRGenPass._match_arch_cond(
                 if cmp is None
                 else self.builder.or_(cmp, eq, name="match.arch.or");
         }
+        if self._vtable_slot_certain(subj_ty) {
+            cmp = self._isinstance_vtable_fallback(
+                cmp, vptr, [arch_name], "match.arch"
+            );
+        }
         fld_bb = func.append_basic_block(name="match.arch.fld");
         self.builder.cbranch(cmp, fld_bb, merge_bb);
         self.builder.position_at_end(fld_bb);
@@ -2072,7 +2085,12 @@ impl NaIRGenPass._codegen_assignment(nd: uni.Assignment) -> None {
                                         );
                                     }
                                     self._codegen_index_set(
-                                        target_val, idx_val, store_val, elem_type_name
+                                        target_val,
+                                        idx_val,
+                                        self._variadic_elem_coerce(
+                                            store_val, target_expr.target
+                                        ),
+                                        elem_type_name
                                     );
                                     _idx_stored = True;
                                 }
