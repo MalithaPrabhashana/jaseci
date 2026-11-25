@@ -177,6 +177,7 @@ graph import {
         byllm.cli
             | byllm.model_cache._emit
             | client.asset_processor
+            | client.build_stages
             | client.cli._npm_context
             | client.client_deps.prompt_install_client_deps
             | client.compiler
@@ -4198,6 +4199,11 @@ graph import client {
         },
         client_runtime | solid_runtime { SignupResult },
     ]
+    build_stages --> [
+        cli.run_client_build { record_stages },
+        jac_client_compiler.JacClientCompiler.compile
+            | targets.web_target.WebTarget.build { stage },
+    ]
     client_bundle ++> [
         compiler { ClientBuildInputs, ClientBundle, ClientBundleError },
         compiler.ViteCompiler._compile_wasm_module { client_program },
@@ -4206,11 +4212,8 @@ graph import client {
             ClientBundleError
         },
         jac_client_compiler.JacClientCompiler._route_exports_of { ClientCompileError },
-        jac_client_compiler.JacClientCompiler.compile { client_source_root },
-        targets.web_target.WebTarget.build {
-            client_context_program,
-            client_source_root
-        },
+        jac_client_compiler.JacClientCompiler.compile
+            | targets.web_target.WebTarget.build { client_source_root },
         vite_client_bundle {
             ClientBuildInputs,
             ClientBundle,
